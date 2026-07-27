@@ -1449,6 +1449,26 @@ async function apiGetAuditLogs(params = {}) {
   return { results: res?.results || [], count: res?.count || 0, next: res?.next || null };
 }
 
+async function apiGetContractTemplates() {
+  const res = await apiRequest("/api/contracts/templates/", { auth: true });
+  return apiListItems(res);
+}
+
+async function apiGenerateContract(payload) {
+  const res = await apiRequest("/api/contracts/generate/", { method: "POST", body: payload });
+  return apiUnwrap(res);
+}
+
+async function apiListContracts(params = {}) {
+  const res = await apiRequest("/api/contracts/", { params });
+  const plain = apiUnwrap(res);
+  return { results: plain?.results || (Array.isArray(plain) ? plain : []), count: plain?.count || 0 };
+}
+
+async function apiDownloadContract(id, filename = "contract.docx") {
+  return apiDownloadFile(`/api/contracts/${id}/download/`, { filename });
+}
+
 Object.assign(window, {
   API_BASE,
   SESSION_KEY,
@@ -1521,4 +1541,8 @@ Object.assign(window, {
   apiWebSocketBase,
   apiGetAuditLogs,
   apiGetAllUsers,
+  apiGetContractTemplates,
+  apiGenerateContract,
+  apiListContracts,
+  apiDownloadContract,
 });

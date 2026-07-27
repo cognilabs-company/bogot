@@ -101,6 +101,7 @@ function Router() {
     case "debtors": page = id ? <OrderDetailPage id={id} /> : <OrdersPage />; break;
     case "payments":
     case "accounting": page = <PaymentsPage />; break;
+    case "contracts": page = window.ContractsPage ? <ContractsPage /> : <Placeholder label="Shartnomalar" />; break;
     case "locations": page = <LocationsPage />; break;
     case "users": page = <UsersPage />; break;
     case "audit-logs":

@@ -16,6 +16,7 @@ const NAV = [
       { path: "/warehouse", key: "page.warehouse", icon: "layers" },
       { path: "/debtors", key: "page.orders", icon: "wallet" },
       { path: "/accounting", key: "page.payments", icon: "chart" },
+      { path: "/contracts", key: "page.contracts", icon: "doc" },
       { path: "/locations", key: "page.locations", icon: "mapPin" },
     ]
   },
@@ -34,8 +35,8 @@ window.NAV = NAV;
 // role-based access: which paths each role can see
 const ROLE_ACCESS = {
   developer: null,
-  admin: ["/dashboard", "/customers", "/tasks", "/inbox", "/products", "/warehouse", "/debtors", "/accounting", "/locations", "/users", "/audit-logs", "/notifications", "/settings"],
-  operator: ["/dashboard", "/customers", "/tasks", "/inbox", "/products", "/warehouse", "/debtors", "/accounting", "/locations", "/notifications", "/integrations", "/settings"],
+  admin: ["/dashboard", "/customers", "/tasks", "/inbox", "/products", "/warehouse", "/debtors", "/accounting", "/contracts", "/locations", "/users", "/audit-logs", "/notifications", "/settings"],
+  operator: ["/dashboard", "/customers", "/tasks", "/inbox", "/products", "/warehouse", "/debtors", "/accounting", "/contracts", "/locations", "/notifications", "/integrations", "/settings"],
 };
 window.ROLE_ACCESS = ROLE_ACCESS;
 const PAGE_PERMISSION_MAP = {
@@ -47,6 +48,7 @@ const PAGE_PERMISSION_MAP = {
   "/warehouse": ["warehouse.view", "warehouse.manage"],
   "/debtors": ["debtors.view", "debtors.manage"],
   "/accounting": ["accounting.view", "accounting.manage"],
+  "/contracts": ["contracts.view", "contracts.manage"],
   "/locations": ["clients.view", "clients.manage"],
   "/users": ["users.view", "users.manage"],
   "/audit-logs": ["audit_logs.view"],
