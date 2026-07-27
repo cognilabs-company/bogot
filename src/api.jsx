@@ -1469,6 +1469,23 @@ async function apiDownloadContract(id, filename = "contract.docx") {
   return apiDownloadFile(`/api/contracts/${id}/download/`, { filename });
 }
 
+async function apiDownloadContractFormat(url, filename) {
+  const session = apiLoadSession();
+  const headers = {};
+  if (session?.access) headers.Authorization = `Bearer ${session.access}`;
+  const response = await fetch(apiNormalizeUrl(url), { headers });
+  if (!response.ok) throw new Error("Yuklab olish xatosi");
+  const blob = await response.blob();
+  const href = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = href;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(href);
+}
+
 Object.assign(window, {
   API_BASE,
   SESSION_KEY,
@@ -1545,4 +1562,5 @@ Object.assign(window, {
   apiGenerateContract,
   apiListContracts,
   apiDownloadContract,
+  apiDownloadContractFormat,
 });

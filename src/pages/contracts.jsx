@@ -52,6 +52,11 @@ const CON_UI = {
     required: "Majburiy maydon",
     loadError: "Shartnomalar yuklanmadi",
     downloadSuccess: "Shartnoma yuklab olindi",
+    downloadTitle: "Shartnomani yuklab olish",
+    downloadFormat: "Format tanlang",
+    downloadDocx: "Word hujjati (.docx)",
+    downloadPdf: "PDF hujjat (.pdf)",
+    formatNotAvail: "Format mavjud emas",
   },
   ru: {
     title: "Контракты", desc: "Создание и управление договорами",
@@ -103,6 +108,11 @@ const CON_UI = {
     required: "Обязательное поле",
     loadError: "Ошибка загрузки контрактов",
     downloadSuccess: "Контракт скачан",
+    downloadTitle: "Скачать контракт",
+    downloadFormat: "Выберите формат",
+    downloadDocx: "Документ Word (.docx)",
+    downloadPdf: "PDF документ (.pdf)",
+    formatNotAvail: "Формат недоступен",
   },
   en: {
     title: "Contracts", desc: "Create and manage contracts",
@@ -154,6 +164,11 @@ const CON_UI = {
     required: "Required field",
     loadError: "Failed to load contracts",
     downloadSuccess: "Contract downloaded",
+    downloadTitle: "Download contract",
+    downloadFormat: "Choose format",
+    downloadDocx: "Word document (.docx)",
+    downloadPdf: "PDF document (.pdf)",
+    formatNotAvail: "Format not available",
   },
 };
 
@@ -539,11 +554,11 @@ function ContractGenerateModal({ open, onClose, onGenerated }) {
     finally { setGenerating(false); }
   };
 
-  const handleDownload = async () => {
+  const handleDownloadFmt = async (url, filename) => {
     if (!generated) return;
     setDownloading(true);
     try {
-      await apiDownloadContract(generated.id, `shartnoma-${generated.contract_number || "file"}.docx`);
+      await apiDownloadContractFormat(url, filename);
       toast(cnTx("downloadSuccess"));
     } catch(e) { toast(e.message || cnTx("downloadError"), "error"); }
     finally { setDownloading(false); }
@@ -567,17 +582,7 @@ function ContractGenerateModal({ open, onClose, onGenerated }) {
   ];
 
   const footer = generated ? (
-    <>
-      <Button variant="ghost" onClick={onClose}>{cnTx("cancel")}</Button>
-      <Button
-        variant="primary"
-        icon={<I.download size={16} />}
-        onClick={handleDownload}
-        disabled={downloading}
-      >
-        {downloading ? "..." : cnTx("download")}
-      </Button>
-    </>
+    <Button variant="ghost" onClick={onClose}>{cnTx("cancel")}</Button>
   ) : step === 0 ? (
     <>
       <Button variant="ghost" onClick={onClose}>{cnTx("cancel")}</Button>
@@ -615,19 +620,19 @@ function ContractGenerateModal({ open, onClose, onGenerated }) {
     >
       {generated ? (
         <div style={{ display: "grid", gap: 20, padding: "8px 0" }}>
-          <div style={{ textAlign: "center", padding: "24px 0 12px" }}>
+          <div style={{ textAlign: "center", padding: "20px 0 8px" }}>
             <div style={{
               width: 56, height: 56, borderRadius: 999,
               background: "var(--green-bg)", color: "var(--green)",
               display: "flex", alignItems: "center", justifyContent: "center",
-              margin: "0 auto 16px",
+              margin: "0 auto 14px",
             }}>
               <I.checkCircle size={28} />
             </div>
             <div style={{ fontSize: 20, fontWeight: 780, letterSpacing: "-.02em", marginBottom: 6 }}>{cnTx("successTitle")}</div>
             <div style={{ color: "var(--text-2)", fontSize: 14 }}>{cnTx("successDesc")}</div>
           </div>
-          <div style={{ background: "var(--surface-2)", borderRadius: 14, padding: "16px 20px", display: "grid", gap: 10 }}>
+          <div style={{ background: "var(--surface-2)", borderRadius: 14, padding: "14px 18px", display: "grid", gap: 8 }}>
             {[
               [cnTx("contractNumber"), generated.contract_number],
               [cnTx("contractTitle"), generated.title || "—"],
@@ -639,6 +644,49 @@ function ContractGenerateModal({ open, onClose, onGenerated }) {
                 <span style={{ fontSize: 13, fontWeight: 600 }}>{val}</span>
               </div>
             ))}
+          </div>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: ".1em", marginBottom: 10 }}>
+              {cnTx("downloadFormat")}
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              {[
+                { key: "docx", label: cnTx("downloadDocx"), url: generated.download_docx_url, color: "blue", icon: <I.doc size={18} />, ext: ".docx" },
+                { key: "pdf",  label: cnTx("downloadPdf"),  url: generated.download_pdf_url,  color: "red",  icon: <I.layers size={18} />, ext: ".pdf" },
+              ].map(fmt => {
+                const avail = !!fmt.url;
+                const base = `shartnoma-${generated.contract_number || generated.id}`;
+                return (
+                  <button
+                    key={fmt.key}
+                    type="button"
+                    disabled={downloading || !avail}
+                    onClick={() => handleDownloadFmt(fmt.url, `${base}${fmt.ext}`)}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 12,
+                      padding: "13px 16px", borderRadius: 12,
+                      border: `1.5px solid ${avail ? `var(--${fmt.color})` : "var(--border)"}`,
+                      background: avail ? `var(--${fmt.color}-bg)` : "var(--surface-2)",
+                      color: avail ? `var(--${fmt.color})` : "var(--text-3)",
+                      cursor: avail && !downloading ? "pointer" : "not-allowed",
+                      opacity: downloading ? 0.6 : 1,
+                      transition: "all .15s",
+                      fontWeight: 600, fontSize: 13,
+                    }}
+                  >
+                    <div style={{
+                      width: 34, height: 34, borderRadius: 8, flexShrink: 0,
+                      background: avail ? `var(--${fmt.color})` : "var(--surface-3)",
+                      color: "#fff",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                    }}>
+                      {downloading ? <I.refresh size={16} className="spin" /> : fmt.icon}
+                    </div>
+                    {fmt.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
       ) : step === 0 ? (
@@ -709,58 +757,177 @@ function ContractGenerateModal({ open, onClose, onGenerated }) {
   );
 }
 
-function ContractRow({ contract, onDownload }) {
-  const [downloading, setDownloading] = cnS(false);
+function ContractDownloadModal({ open, onClose, contract }) {
   const { toast } = useApp();
+  const [loadingDocx, setLoadingDocx] = cnS(false);
+  const [loadingPdf, setLoadingPdf] = cnS(false);
 
-  const handleDownload = async () => {
-    setDownloading(true);
+  if (!contract) return null;
+
+  const base = `shartnoma-${contract.contract_number || contract.id}`;
+
+  const downloadFmt = async (url, filename, setLoading) => {
+    if (!url) { toast(cnTx("formatNotAvail"), "error"); return; }
+    setLoading(true);
     try {
-      await apiDownloadContract(contract.id, `shartnoma-${contract.contract_number || "file"}.docx`);
+      await apiDownloadContractFormat(url, filename);
       toast(cnTx("downloadSuccess"));
     } catch(e) { toast(e.message || cnTx("downloadError"), "error"); }
-    finally { setDownloading(false); }
+    finally { setLoading(false); }
   };
 
+  const formats = [
+    {
+      key: "docx",
+      label: cnTx("downloadDocx"),
+      ext: ".docx",
+      url: contract.download_docx_url,
+      color: "blue",
+      icon: <I.doc size={20} />,
+      loading: loadingDocx,
+      setLoading: setLoadingDocx,
+    },
+    {
+      key: "pdf",
+      label: cnTx("downloadPdf"),
+      ext: ".pdf",
+      url: contract.download_pdf_url,
+      color: "red",
+      icon: <I.layers size={20} />,
+      loading: loadingPdf,
+      setLoading: setLoadingPdf,
+    },
+  ];
+
   return (
-    <div style={{
-      display: "grid",
-      gridTemplateColumns: "90px 1fr 1fr auto 120px 44px",
-      gap: 12,
-      padding: "14px 16px",
-      alignItems: "center",
-      borderBottom: "1px solid var(--border)",
-      background: "transparent",
-      transition: "background .12s",
-    }}
-      onMouseEnter={e => e.currentTarget.style.background = "var(--surface-2)"}
-      onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={cnTx("downloadTitle")}
+      icon={<I.download size={18} />}
+      width={420}
+      footer={<Button variant="ghost" onClick={onClose}>{cnTx("cancel")}</Button>}
     >
-      <div style={{ fontWeight: 700, fontSize: 14, color: "var(--text)", fontVariantNumeric: "tabular-nums" }}>
-        #{contract.contract_number || "—"}
+      <div style={{ display: "grid", gap: 16 }}>
+        <div style={{ background: "var(--surface-2)", borderRadius: 12, padding: "12px 16px", display: "grid", gap: 6 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 13, color: "var(--text-3)" }}>{cnTx("contractNumber")}</span>
+            <span style={{ fontWeight: 700, fontSize: 13 }}>#{contract.contract_number || "—"}</span>
+          </div>
+          {contract.title && (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 13, color: "var(--text-3)" }}>{cnTx("contractTitle")}</span>
+              <span style={{ fontSize: 13, fontWeight: 600 }}>{contract.title}</span>
+            </div>
+          )}
+          {contract.primary_party_name && (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 13, color: "var(--text-3)" }}>{cnTx("primaryPartyName")}</span>
+              <span style={{ fontSize: 13 }}>{contract.primary_party_name}</span>
+            </div>
+          )}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 13, color: "var(--text-3)" }}>Tur</span>
+            <ContractTypeBadge type={contract.contract_type} />
+          </div>
+        </div>
+
+        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: ".1em" }}>
+          {cnTx("downloadFormat")}
+        </div>
+
+        <div style={{ display: "grid", gap: 10 }}>
+          {formats.map(fmt => {
+            const avail = !!fmt.url;
+            return (
+              <button
+                key={fmt.key}
+                type="button"
+                disabled={fmt.loading || !avail}
+                onClick={() => downloadFmt(fmt.url, `${base}${fmt.ext}`, fmt.setLoading)}
+                style={{
+                  display: "flex", alignItems: "center", gap: 14,
+                  padding: "14px 16px", borderRadius: 14,
+                  border: `1.5px solid ${avail ? `var(--${fmt.color})` : "var(--border)"}`,
+                  background: avail ? `var(--${fmt.color}-bg)` : "var(--surface-2)",
+                  color: avail ? `var(--${fmt.color})` : "var(--text-3)",
+                  cursor: avail ? "pointer" : "not-allowed",
+                  opacity: fmt.loading ? 0.7 : 1,
+                  transition: "all .15s",
+                  textAlign: "left",
+                  width: "100%",
+                }}
+              >
+                <div style={{
+                  width: 40, height: 40, borderRadius: 10, flexShrink: 0,
+                  background: avail ? `var(--${fmt.color})` : "var(--surface-3)",
+                  color: "#fff",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}>
+                  {fmt.loading ? <I.refresh size={18} className="spin" /> : fmt.icon}
+                </div>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 14 }}>{fmt.label}</div>
+                  {!avail && (
+                    <div style={{ fontSize: 12, marginTop: 2, opacity: 0.7 }}>{cnTx("formatNotAvail")}</div>
+                  )}
+                </div>
+                {avail && !fmt.loading && (
+                  <I.download size={16} style={{ marginLeft: "auto", opacity: 0.6 }} />
+                )}
+              </button>
+            );
+          })}
+        </div>
       </div>
-      <div>
-        <div style={{ fontWeight: 600, fontSize: 13 }}>{contract.title || "—"}</div>
-        {contract.primary_party_name && (
-          <div style={{ fontSize: 12, color: "var(--text-3)", marginTop: 2 }}>{contract.primary_party_name}</div>
-        )}
+    </Modal>
+  );
+}
+
+function ContractRow({ contract }) {
+  const [dlOpen, setDlOpen] = cnS(false);
+
+  return (
+    <>
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "90px 1fr 1fr auto 120px 44px",
+        gap: 12,
+        padding: "14px 16px",
+        alignItems: "center",
+        borderBottom: "1px solid var(--border)",
+        background: "transparent",
+        transition: "background .12s",
+      }}
+        onMouseEnter={e => e.currentTarget.style.background = "var(--surface-2)"}
+        onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+      >
+        <div style={{ fontWeight: 700, fontSize: 14, color: "var(--text)", fontVariantNumeric: "tabular-nums" }}>
+          #{contract.contract_number || "—"}
+        </div>
+        <div>
+          <div style={{ fontWeight: 600, fontSize: 13 }}>{contract.title || "—"}</div>
+          {contract.primary_party_name && (
+            <div style={{ fontSize: 12, color: "var(--text-3)", marginTop: 2 }}>{contract.primary_party_name}</div>
+          )}
+        </div>
+        <div style={{ fontSize: 12, color: "var(--text-2)" }}>
+          {contract.created_by_username || "—"}
+        </div>
+        <ContractTypeBadge type={contract.contract_type} />
+        <div style={{ fontSize: 12, color: "var(--text-3)", textAlign: "right" }}>
+          {fmtContractDate(contract.created_at)}
+        </div>
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <IconButton
+            icon={<I.download size={15} />}
+            label={cnTx("download")}
+            onClick={() => setDlOpen(true)}
+          />
+        </div>
       </div>
-      <div style={{ fontSize: 12, color: "var(--text-2)" }}>
-        {contract.created_by_username || "—"}
-      </div>
-      <ContractTypeBadge type={contract.contract_type} />
-      <div style={{ fontSize: 12, color: "var(--text-3)", textAlign: "right" }}>
-        {fmtContractDate(contract.created_at)}
-      </div>
-      <div style={{ display: "flex", justifyContent: "flex-end" }}>
-        <IconButton
-          icon={downloading ? <I.refresh size={15} className="spin" /> : <I.download size={15} />}
-          label={cnTx("download")}
-          onClick={handleDownload}
-          disabled={downloading}
-        />
-      </div>
-    </div>
+      <ContractDownloadModal open={dlOpen} onClose={() => setDlOpen(false)} contract={contract} />
+    </>
   );
 }
 
