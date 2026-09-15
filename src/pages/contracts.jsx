@@ -57,6 +57,10 @@ const CON_UI = {
     downloadDocx: "Word hujjati (.docx)",
     downloadPdf: "PDF hujjat (.pdf)",
     formatNotAvail: "Format mavjud emas",
+    penaltyAmount: "Jarima summasi",
+    penaltyAmountDesc: "To'lov 30 kundan ortiq kechiksa solinadigan jarima",
+    penaltyPreview: "Hujjatda",
+    som: "so'm",
   },
   ru: {
     title: "Контракты", desc: "Создание и управление договорами",
@@ -113,6 +117,10 @@ const CON_UI = {
     downloadDocx: "Документ Word (.docx)",
     downloadPdf: "PDF документ (.pdf)",
     formatNotAvail: "Формат недоступен",
+    penaltyAmount: "Сумма штрафа",
+    penaltyAmountDesc: "Штраф, если оплата просрочена более чем на 30 дней",
+    penaltyPreview: "В документе",
+    som: "сум",
   },
   en: {
     title: "Contracts", desc: "Create and manage contracts",
@@ -169,6 +177,10 @@ const CON_UI = {
     downloadDocx: "Word document (.docx)",
     downloadPdf: "PDF document (.pdf)",
     formatNotAvail: "Format not available",
+    penaltyAmount: "Penalty amount",
+    penaltyAmountDesc: "Charged if payment is more than 30 days late",
+    penaltyPreview: "In document",
+    som: "UZS",
   },
 };
 
@@ -235,6 +247,7 @@ function blankRetail() {
     delivery_penalty_percent: "1", delivery_penalty_max_percent: "10",
     quality_penalty_percent: "5", late_payment_daily_penalty_text: "1",
     late_payment_penalty_max_percent: "50", contract_end_date: "",
+    penalty_amount: "",
     products: [{ name: "", unit: "Dona", quantity: "1", model: "", price: "" }],
   };
 }
@@ -252,6 +265,40 @@ function blankGuarantee() {
     principal_repayment_terms: "", interest_repayment_terms: "",
     other_terms: "Kelishuv asosida",
   };
+}
+
+function RetailPenaltyAmountField({ form, set }) {
+  const amount = form.penalty_amount || "";
+  const dailyPct = form.late_payment_daily_penalty_text || "1";
+  return (
+    <div className="cn-penalty">
+      <div className="cn-penalty-head">
+        <span className="cn-penalty-icon"><I.alert size={16} /></span>
+        <div style={{ display: "grid", gap: 2 }}>
+          <span className="cn-penalty-title">{cnTx("penaltyAmount")}</span>
+          <span className="cn-penalty-sub">{cnTx("penaltyAmountDesc")}</span>
+        </div>
+      </div>
+      <Field hint={amount ? `${fmtNum(amount)} ${cnTx("som")}` : null}>
+        <div className="cn-penalty-input">
+          <Input
+            aria-label={cnTx("penaltyAmount")}
+            inputMode="numeric"
+            value={amount}
+            onChange={e => set("penalty_amount", e.target.value.replace(/[^\d]/g, ""))}
+            placeholder="15000000"
+          />
+          <span className="cn-penalty-suffix">{cnTx("som")}</span>
+        </div>
+      </Field>
+      {amount && (
+        <div className="cn-penalty-preview">
+          <span style={{ color: "var(--text-3)" }}>{cnTx("penaltyPreview")}: </span>
+          {dailyPct} foiz va shartnoma vaqtida puli 30 kundan ortiq kech qolsa shartnoma buzilgan hisoblanadi va <b>{amount} so`m</b> jarima solinadi
+        </div>
+      )}
+    </div>
+  );
 }
 
 function RetailSaleForm({ form, set, setProduct }) {
@@ -352,6 +399,7 @@ function RetailSaleForm({ form, set, setProduct }) {
           <Field label={cnTx("latePenaltyText")}><Input value={form.late_payment_daily_penalty_text} onChange={e => set("late_payment_daily_penalty_text", e.target.value)} placeholder="1" /></Field>
           <Field label={cnTx("latePenaltyMaxPct")}><Input value={form.late_payment_penalty_max_percent} onChange={e => set("late_payment_penalty_max_percent", e.target.value)} placeholder="50" /></Field>
         </div>
+        <RetailPenaltyAmountField form={form} set={set} />
       </FormSection>
     </div>
   );
@@ -478,6 +526,7 @@ function ContractGenerateModal({ open, onClose, onGenerated }) {
       late_payment_daily_penalty_text: f.late_payment_daily_penalty_text || undefined,
       late_payment_penalty_max_percent: f.late_payment_penalty_max_percent || undefined,
       contract_end_date: toApiDate(f.contract_end_date) || undefined,
+      penalty_amount: String(f.penalty_amount || "").trim() || undefined,
     };
   };
 
@@ -638,6 +687,9 @@ function ContractGenerateModal({ open, onClose, onGenerated }) {
               [cnTx("contractTitle"), generated.title || "—"],
               [cnTx("primaryPartyName"), generated.primary_party_name || "—"],
               ["Tur", generated.contract_type === "retail_sale" ? cnTx("typeRetailSale") : cnTx("typeGuarantee")],
+              ...(generated.contract_type === "retail_sale" && generated.payload?.penalty_amount
+                ? [[cnTx("penaltyAmount"), `${fmtNum(generated.payload.penalty_amount)} ${cnTx("som")}`]]
+                : []),
             ].map(([label, val]) => (
               <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
                 <span style={{ fontSize: 13, color: "var(--text-3)" }}>{label}</span>

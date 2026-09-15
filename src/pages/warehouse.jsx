@@ -190,52 +190,166 @@ function WarehouseItemModal({ open, initial, categories, t, onClose, onSave }) {
   );
 }
 
-function StockEntryModal({ open, items, t, onClose, onSave }) {
-  const [form, setForm] = whS({ item: "", quantity: "", currency: "uzs", unit_cost: "", supplier_name: "", received_at: "", notes: "" });
+const whRefId = (ref) => (ref && typeof ref === "object" ? ref.id || "" : ref || "");
+const whInputNum = (value) => (value === null || value === undefined || value === "" ? "" : String(whNum(value)));
+const whDateTimeForInput = (value) => {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+// Keep the original timestamp when the picker value was not touched (avoids second-level drift in audit logs)
+const whDateTimeForSave = (value, initialValue, initialRaw) => (
+  initialRaw && value === initialValue ? initialRaw : whDateTimeForApi(value)
+);
+function whApiFieldErrors(error) {
+  const payload = error?.payload;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return {};
+  return Object.fromEntries(Object.entries(payload)
+    .map(([key, value]) => [key, Array.isArray(value) ? String(value[0] ?? "") : (typeof value === "string" ? value : "")])
+    .filter(([, value]) => value));
+}
+function whItemSelectOptions(items, t, fallback) {
+  const options = [
+    { value: "", label: whTx(t, "chooseItem") },
+    ...items.map((item) => ({ value: item.id, label: `${item.name} · ${fmtNum(whNum(item.current_quantity))} ${whItemUnit(item)}` })),
+  ];
+  if (fallback?.id && !items.some((item) => item.id === fallback.id)) options.push({ value: fallback.id, label: fallback.name });
+  return options;
+}
+
+function WarehouseFormError({ message }) {
+  if (!message) return null;
+  return (
+    <div className="wh-form-alert is-error">
+      <I.alert size={15} />
+      <span>{message}</span>
+    </div>
+  );
+}
+
+function WarehouseFieldError({ message }) {
+  return message ? <span className="wh-field-error">{message}</span> : null;
+}
+
+function WarehouseStockImpact({ t, current, next, unit, warning }) {
+  const delta = next - current;
+  const negative = next < 0;
+  const tone = negative ? "red" : delta > 0 ? "green" : delta < 0 ? "amber" : "slate";
+  return (
+    <div className={`wh-impact${negative ? " is-negative" : ""}`}>
+      <div className="wh-impact-cell">
+        <span className="wh-impact-k">{whTx(t, "currentStock")}</span>
+        <span className="wh-impact-v">{fmtNum(current)} <small>{unit}</small></span>
+      </div>
+      <span className="wh-impact-arrow"><I.arrowRight size={15} /></span>
+      <div className="wh-impact-cell">
+        <span className="wh-impact-k">{whTx(t, "projectedStock")}</span>
+        <span className="wh-impact-v" style={{ color: negative ? "var(--red)" : "var(--text)" }}>{fmtNum(next)} <small>{unit}</small></span>
+      </div>
+      <Badge color={tone} size="sm">{delta > 0 ? "+" : ""}{fmtNum(delta)}</Badge>
+      {(negative || warning) && (
+        <div className="wh-impact-warn"><I.alert size={13} />{negative ? whTx(t, "negativeStock") : warning}</div>
+      )}
+    </div>
+  );
+}
+
+function WarehouseEditNotice({ t }) {
+  return (
+    <div className="wh-form-alert is-info">
+      <I.info size={15} />
+      <span>{whTx(t, "editRecalcHint")}</span>
+    </div>
+  );
+}
+
+const whStockBlank = () => ({ item: "", quantity: "", currency: "uzs", unit_cost: "", supplier_name: "", received_at: "", notes: "" });
+const whStockFormFrom = (entry) => ({
+  item: whRefId(entry.item),
+  quantity: whInputNum(entry.quantity),
+  currency: entry.currency || entry.item?.default_currency || "uzs",
+  unit_cost: whInputNum(entry.unit_cost),
+  supplier_name: entry.supplier_name || "",
+  received_at: whDateTimeForInput(entry.received_at),
+  notes: entry.notes || "",
+});
+
+function StockEntryModal({ open, initial, items, t, onClose, onSave }) {
+  const isEdit = !!initial?.id;
+  const [form, setForm] = whS(whStockBlank);
   const [saving, setSaving] = whS(false);
   const [error, setError] = whS("");
+  const [fieldErrors, setFieldErrors] = whS({});
 
   whE(() => {
     if (!open) return;
-    setForm({ item: "", quantity: "", currency: "uzs", unit_cost: "", supplier_name: "", received_at: "", notes: "" });
+    setForm(isEdit ? whStockFormFrom(initial) : whStockBlank());
     setError("");
-  }, [open]);
+    setFieldErrors({});
+  }, [open, initial]);
 
-  const set = (key, value) => setForm((current) => ({ ...current, [key]: value }));
+  const set = (key, value) => {
+    setForm((current) => ({ ...current, [key]: value }));
+    setFieldErrors((current) => (current[key] ? { ...current, [key]: "" } : current));
+  };
+  const originalItemId = isEdit ? whRefId(initial.item) : "";
+  const originalQty = isEdit ? whNum(initial.quantity) : 0;
   const selected = items.find((item) => item.id === form.item);
   const total = whNum(form.quantity) * whNum(form.unit_cost);
-  const itemOptions = whM(() => [
-    { value: "", label: whTx(t, "chooseItem") },
-    ...items.map((item) => ({ value: item.id, label: `${item.name} · ${fmtNum(whNum(item.current_quantity))} ${whItemUnit(item)}` })),
-  ], [items, t]);
+  const itemOptions = whM(
+    () => whItemSelectOptions(items, t, isEdit ? { id: originalItemId, name: whItemName(initial) } : null),
+    [items, t, isEdit, originalItemId, initial]
+  );
+
+  const impact = (() => {
+    if (!selected || form.quantity === "") return null;
+    const current = whNum(selected.current_quantity);
+    const sameItem = isEdit && selected.id === originalItemId;
+    const next = current + whNum(form.quantity) - (sameItem ? originalQty : 0);
+    let warning = "";
+    if (isEdit && !sameItem) {
+      const previous = items.find((item) => item.id === originalItemId);
+      if (previous && whNum(previous.current_quantity) - originalQty < 0) warning = whTx(t, "prevItemNegative");
+    }
+    return { current, next, warning };
+  })();
 
   const handleSave = async () => {
     if (!form.item) { setError(whTx(t, "itemRequired")); return; }
-    if (whNum(form.quantity) <= 0) { setError(whTx(t, "quantityRequired")); return; }
-    setSaving(true); setError("");
+    if (whNum(form.quantity) <= 0) { setError(whTx(t, "quantityRequired")); setFieldErrors({ quantity: whTx(t, "quantityRequired") }); return; }
+    setSaving(true); setError(""); setFieldErrors({});
     try {
-      await onSave({ ...form, received_at: whDateTimeForApi(form.received_at) });
+      const receivedAt = isEdit
+        ? whDateTimeForSave(form.received_at, whDateTimeForInput(initial.received_at), initial.received_at)
+        : whDateTimeForApi(form.received_at);
+      await onSave({ ...form, received_at: receivedAt });
       onClose();
     } catch (e) {
-      setError(e?.message || whTx(t, "stockCreateFail"));
+      setFieldErrors(whApiFieldErrors(e));
+      setError(e?.message || whTx(t, isEdit ? "stockUpdateFail" : "stockCreateFail"));
     } finally {
       setSaving(false);
     }
   };
 
   if (!open) return null;
+  const saveLabel = isEdit ? whTx(t, "save") : whTx(t, "create");
   return (
-    <Modal open={open} onClose={onClose} title={whTx(t, "stockFormTitle")} size="md"
-      footer={<><Button variant="ghost" onClick={onClose}>{whTx(t, "cancel")}</Button><Button variant="primary" onClick={handleSave} disabled={saving}>{saving ? `${whTx(t, "save")}...` : whTx(t, "create")}</Button></>}>
+    <Modal open={open} onClose={onClose} title={whTx(t, isEdit ? "editStock" : "stockFormTitle")} icon={isEdit ? <I.edit size={16} /> : <I.download size={16} />}
+      footer={<><Button variant="ghost" onClick={onClose}>{whTx(t, "cancel")}</Button><Button variant="primary" onClick={handleSave} disabled={saving}>{saving ? `${saveLabel}...` : saveLabel}</Button></>}>
       <div style={{ display: "grid", gap: 14 }}>
-        {error && <div style={{ color: "var(--red)", fontSize: 13, padding: "8px 12px", background: "var(--red-bg)", borderRadius: 6 }}>{error}</div>}
-        <Field label={whTx(t, "item")}><Select value={form.item} onChange={v => { set("item", v); const item = items.find(x => x.id === v); if (item) set("currency", item.default_currency || "uzs"); }} options={itemOptions} /></Field>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-          <Field label={whTx(t, "quantity")}><Input type="number" min="0" value={form.quantity} onChange={e => set("quantity", e.target.value)} /></Field>
+        {isEdit && <WarehouseEditNotice t={t} />}
+        <WarehouseFormError message={error} />
+        <Field label={whTx(t, "item")} hint={fieldErrors.item && <WarehouseFieldError message={fieldErrors.item} />}><Select value={form.item} onChange={v => { set("item", v); const item = items.find(x => x.id === v); if (item) set("currency", item.default_currency || "uzs"); }} options={itemOptions} /></Field>
+        <div className="wh-form-grid-3">
+          <Field label={whTx(t, "quantity")} hint={fieldErrors.quantity && <WarehouseFieldError message={fieldErrors.quantity} />}><Input className={`tg-input${fieldErrors.quantity ? " is-invalid" : ""}`} type="number" min="0" value={form.quantity} onChange={e => set("quantity", e.target.value)} /></Field>
           <Field label={whTx(t, "currency")}><Select value={form.currency} onChange={v => set("currency", v)} options={[{ value: "uzs", label: "UZS" }, { value: "usd", label: "USD" }]} /></Field>
-          <Field label={whTx(t, "unitCost")}><Input type="number" min="0" value={form.unit_cost} onChange={e => set("unit_cost", e.target.value)} /></Field>
+          <Field label={whTx(t, "unitCost")} hint={fieldErrors.unit_cost && <WarehouseFieldError message={fieldErrors.unit_cost} />}><Input className={`tg-input${fieldErrors.unit_cost ? " is-invalid" : ""}`} type="number" min="0" value={form.unit_cost} onChange={e => set("unit_cost", e.target.value)} /></Field>
         </div>
         {total > 0 && <div className="tg-chips"><span className="tg-chip">{whTx(t, "totalCost")}: {whMoney(total, form.currency)}</span>{selected && <span className="tg-chip">{whTx(t, "unit")}: {whItemUnit(selected)}</span>}</div>}
+        {impact && <WarehouseStockImpact t={t} current={impact.current} next={impact.next} unit={whItemUnit(selected)} warning={impact.warning} />}
         <Field label={whTx(t, "supplier")}><Input value={form.supplier_name} onChange={e => set("supplier_name", e.target.value)} /></Field>
         <Field label={whTx(t, "receivedAt")}><DatePickerInput value={form.received_at} onChange={v => set("received_at", v)} mode="datetime" /></Field>
         <Field label={whTx(t, "notes")}><Input value={form.notes} onChange={e => set("notes", e.target.value)} /></Field>
@@ -244,60 +358,100 @@ function StockEntryModal({ open, items, t, onClose, onSave }) {
   );
 }
 
-function SaleModal({ open, items, customers, t, onClose, onSave }) {
-  const [form, setForm] = whS({ item: "", client: "", quantity: "1", currency: "uzs", unit_price: "", paid_amount: "", payment_type: "cash", client_name: "", client_phone: "", sold_at: "", notes: "" });
+const whSaleBlank = () => ({ item: "", client: "", quantity: "1", currency: "uzs", unit_price: "", paid_amount: "", payment_type: "cash", client_name: "", client_phone: "", sold_at: "", notes: "" });
+const whSaleFormFrom = (sale) => ({
+  item: whRefId(sale.item),
+  client: whRefId(sale.client),
+  quantity: whInputNum(sale.quantity),
+  currency: sale.currency || sale.item?.default_currency || "uzs",
+  unit_price: whInputNum(sale.unit_price),
+  paid_amount: whInputNum(sale.paid_amount),
+  payment_type: sale.payment_type || "cash",
+  client_name: sale.client_name || sale.client_full_name || "",
+  client_phone: sale.client_phone || "",
+  sold_at: whDateTimeForInput(sale.sold_at),
+  notes: sale.notes || "",
+});
+const whCustomerName = (c) => c.fullName || c.full_name || [c.first_name, c.last_name].filter(Boolean).join(" ") || c.name || c.phone || c.id;
+
+function SaleModal({ open, initial, items, customers, t, onClose, onSave }) {
+  const isEdit = !!initial?.id;
+  const [form, setForm] = whS(whSaleBlank);
   const [saving, setSaving] = whS(false);
   const [error, setError] = whS("");
+  const [fieldErrors, setFieldErrors] = whS({});
 
   whE(() => {
     if (!open) return;
-    setForm({ item: "", client: "", quantity: "1", currency: "uzs", unit_price: "", paid_amount: "", payment_type: "cash", client_name: "", client_phone: "", sold_at: "", notes: "" });
+    setForm(isEdit ? whSaleFormFrom(initial) : whSaleBlank());
     setError("");
-  }, [open]);
+    setFieldErrors({});
+  }, [open, initial]);
 
-  const set = (key, value) => setForm((current) => ({ ...current, [key]: value }));
+  const set = (key, value) => {
+    setForm((current) => ({ ...current, [key]: value }));
+    setFieldErrors((current) => (current[key] ? { ...current, [key]: "" } : current));
+  };
+  const originalItemId = isEdit ? whRefId(initial.item) : "";
+  const originalQty = isEdit ? whNum(initial.quantity) : 0;
   const selected = items.find((item) => item.id === form.item);
   const total = whNum(form.quantity) * whNum(form.unit_price);
-  const itemOptions = whM(() => [
-    { value: "", label: whTx(t, "chooseItem") },
-    ...items.map((item) => ({ value: item.id, label: `${item.name} · ${fmtNum(whNum(item.current_quantity))} ${whItemUnit(item)}` })),
-  ], [items, t]);
+  const itemOptions = whM(
+    () => whItemSelectOptions(items, t, isEdit ? { id: originalItemId, name: whItemName(initial) } : null),
+    [items, t, isEdit, originalItemId, initial]
+  );
   const payTypeOptions = ["cash", "card", "transfer", "debt", "other"].map((value) => ({ value, label: whPayTypeLabel(t, value) }));
   const customerOptions = whM(() => [
     { value: "", label: whTx(t, "chooseItem") },
-    ...((customers || []).map((c) => ({ value: c.id, label: c.fullName || c.full_name || [c.first_name, c.last_name].filter(Boolean).join(" ") || c.name || c.phone || c.id }))),
+    ...((customers || []).map((c) => ({ value: c.id, label: whCustomerName(c) }))),
   ], [customers, t]);
+
+  // Backend returns the old sale to stock first, then subtracts the new one
+  const impact = (() => {
+    if (!selected || form.quantity === "") return null;
+    const sameItem = isEdit && selected.id === originalItemId;
+    const current = whNum(selected.current_quantity);
+    const available = current + (sameItem ? originalQty : 0);
+    return { current, next: available - whNum(form.quantity) };
+  })();
 
   const handleSave = async () => {
     if (!form.item) { setError(whTx(t, "itemRequired")); return; }
-    if (whNum(form.quantity) <= 0) { setError(whTx(t, "quantityRequired")); return; }
-    if (whNum(form.unit_price) <= 0) { setError(whTx(t, "priceRequired")); return; }
-    setSaving(true); setError("");
+    if (whNum(form.quantity) <= 0) { setError(whTx(t, "quantityRequired")); setFieldErrors({ quantity: whTx(t, "quantityRequired") }); return; }
+    if (whNum(form.unit_price) <= 0) { setError(whTx(t, "priceRequired")); setFieldErrors({ unit_price: whTx(t, "priceRequired") }); return; }
+    setSaving(true); setError(""); setFieldErrors({});
     try {
-      await onSave({ ...form, sold_at: whDateTimeForApi(form.sold_at) });
+      const soldAt = isEdit
+        ? whDateTimeForSave(form.sold_at, whDateTimeForInput(initial.sold_at), initial.sold_at)
+        : whDateTimeForApi(form.sold_at);
+      await onSave({ ...form, sold_at: soldAt });
       onClose();
     } catch (e) {
-      setError(e?.message || whTx(t, "saleCreateFail"));
+      setFieldErrors(whApiFieldErrors(e));
+      setError(e?.message || whTx(t, isEdit ? "saleUpdateFail" : "saleCreateFail"));
     } finally {
       setSaving(false);
     }
   };
 
   if (!open) return null;
+  const saveLabel = isEdit ? whTx(t, "save") : whTx(t, "create");
   return (
-    <Modal open={open} onClose={onClose} title={whTx(t, "saleFormTitle")} size="md"
-      footer={<><Button variant="ghost" onClick={onClose}>{whTx(t, "cancel")}</Button><Button variant="primary" onClick={handleSave} disabled={saving}>{saving ? `${whTx(t, "save")}...` : whTx(t, "create")}</Button></>}>
+    <Modal open={open} onClose={onClose} title={whTx(t, isEdit ? "editSale" : "saleFormTitle")} icon={isEdit ? <I.edit size={16} /> : <I.cart size={16} />}
+      footer={<><Button variant="ghost" onClick={onClose}>{whTx(t, "cancel")}</Button><Button variant="primary" onClick={handleSave} disabled={saving}>{saving ? `${saveLabel}...` : saveLabel}</Button></>}>
       <div style={{ display: "grid", gap: 14 }}>
-        {error && <div style={{ color: "var(--red)", fontSize: 13, padding: "8px 12px", background: "var(--red-bg)", borderRadius: 6 }}>{error}</div>}
-        <Field label={whTx(t, "item")}><Select value={form.item} onChange={v => { set("item", v); const item = items.find(x => x.id === v); if (item) set("currency", item.default_currency || "uzs"); }} options={itemOptions} /></Field>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-          <Field label={whTx(t, "quantity")}><Input type="number" min="0" value={form.quantity} onChange={e => set("quantity", e.target.value)} /></Field>
+        {isEdit && <WarehouseEditNotice t={t} />}
+        <WarehouseFormError message={error} />
+        <Field label={whTx(t, "item")} hint={fieldErrors.item && <WarehouseFieldError message={fieldErrors.item} />}><Select value={form.item} onChange={v => { set("item", v); const item = items.find(x => x.id === v); if (item) set("currency", item.default_currency || "uzs"); }} options={itemOptions} /></Field>
+        <div className="wh-form-grid-3">
+          <Field label={whTx(t, "quantity")} hint={fieldErrors.quantity && <WarehouseFieldError message={fieldErrors.quantity} />}><Input className={`tg-input${fieldErrors.quantity ? " is-invalid" : ""}`} type="number" min="0" value={form.quantity} onChange={e => set("quantity", e.target.value)} /></Field>
           <Field label={whTx(t, "currency")}><Select value={form.currency} onChange={v => set("currency", v)} options={[{ value: "uzs", label: "UZS" }, { value: "usd", label: "USD" }]} /></Field>
-          <Field label={whTx(t, "unitPrice")}><Input type="number" min="0" value={form.unit_price} onChange={e => set("unit_price", e.target.value)} /></Field>
+          <Field label={whTx(t, "unitPrice")} hint={fieldErrors.unit_price && <WarehouseFieldError message={fieldErrors.unit_price} />}><Input className={`tg-input${fieldErrors.unit_price ? " is-invalid" : ""}`} type="number" min="0" value={form.unit_price} onChange={e => set("unit_price", e.target.value)} /></Field>
         </div>
-        {total > 0 && <div className="tg-chips"><span className="tg-chip">{whTx(t, "totalAmount")}: {whMoney(total, form.currency)}</span>{selected && <span className="tg-chip">{whTx(t, "currentStock")}: {fmtNum(whNum(selected.current_quantity))} {whItemUnit(selected)}</span>}</div>}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <Field label={whTx(t, "paidAmount")}><Input type="number" min="0" value={form.paid_amount} onChange={e => set("paid_amount", e.target.value)} /></Field>
+        {total > 0 && <div className="tg-chips"><span className="tg-chip">{whTx(t, "totalAmount")}: {whMoney(total, form.currency)}</span></div>}
+        {impact && <WarehouseStockImpact t={t} current={impact.current} next={impact.next} unit={whItemUnit(selected)} />}
+        <div className="wh-form-grid-2">
+          <Field label={whTx(t, "paidAmount")} hint={fieldErrors.paid_amount && <WarehouseFieldError message={fieldErrors.paid_amount} />}><Input className={`tg-input${fieldErrors.paid_amount ? " is-invalid" : ""}`} type="number" min="0" value={form.paid_amount} onChange={e => set("paid_amount", e.target.value)} /></Field>
           <Field label={whTx(t, "paymentType")}><Select value={form.payment_type} onChange={v => set("payment_type", v)} options={payTypeOptions} /></Field>
         </div>
         {customers && customers.length > 0 && (
@@ -306,13 +460,13 @@ function SaleModal({ open, items, customers, t, onClose, onSave }) {
               const c = (customers || []).find(x => x.id === v);
               set("client", v);
               if (c) {
-                set("client_name", c.fullName || c.full_name || [c.first_name, c.last_name].filter(Boolean).join(" ") || c.name || form.client_name);
+                set("client_name", whCustomerName(c) || form.client_name);
                 set("client_phone", c.phone || form.client_phone);
               }
             }} options={customerOptions} />
           </Field>
         )}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div className="wh-form-grid-2">
           <Field label={whTx(t, "clientName")}><Input value={form.client_name} onChange={e => set("client_name", e.target.value)} /></Field>
           <Field label={whTx(t, "clientPhone")}><Input value={form.client_phone} onChange={e => set("client_phone", e.target.value)} placeholder="+998" /></Field>
         </div>
@@ -339,6 +493,8 @@ function WarehousePage() {
   const [loadingSales, setLoadingSales] = whS(false);
   const [stockOpen, setStockOpen] = whS(false);
   const [saleOpen, setSaleOpen] = whS(false);
+  const [editStock, setEditStock] = whS(null);
+  const [editSale, setEditSale] = whS(null);
   const [itemOpen, setItemOpen] = whS(false);
   const [editItem, setEditItem] = whS(null);
   const [deleteItem, setDeleteItem] = whS(null);
@@ -489,8 +645,8 @@ function WarehousePage() {
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <Button variant="default" size="sm" icon={<I.download size={15} />} onClick={exportExcel} disabled={exporting}>Excel</Button>
             <Button variant="ghost" size="sm" icon={<I.plus size={15} />} onClick={() => { setEditItem(null); setItemOpen(true); }}>{whTx(t, "newItem")}</Button>
-            <Button variant="ghost" size="sm" icon={<I.plus size={15} />} onClick={() => setStockOpen(true)}>{whTx(t, "newStock")}</Button>
-            <Button variant="primary" size="sm" icon={<I.plus size={15} />} onClick={() => setSaleOpen(true)}>{whTx(t, "newSale")}</Button>
+            <Button variant="ghost" size="sm" icon={<I.plus size={15} />} onClick={() => { setEditStock(null); setStockOpen(true); }}>{whTx(t, "newStock")}</Button>
+            <Button variant="primary" size="sm" icon={<I.plus size={15} />} onClick={() => { setEditSale(null); setSaleOpen(true); }}>{whTx(t, "newSale")}</Button>
           </div>
         )}
       />
@@ -625,13 +781,14 @@ function WarehousePage() {
                     <th style={{ textAlign: "right" }}>{whTx(t, "totalCost")}</th>
                     <th>{whTx(t, "supplier")}</th>
                     <th>{whTx(t, "receivedAt")}</th>
+                    {canManage && <th style={{ width: 52 }}></th>}
                   </tr>
                 </thead>
                 <tbody>
                   {loadingStock ? (
-                    <tr><td colSpan="7"><SkeletonRows cols={7} rows={6} /></td></tr>
+                    <tr><td colSpan={canManage ? 8 : 7}><SkeletonRows cols={canManage ? 8 : 7} rows={6} /></td></tr>
                   ) : stockEntries.length === 0 ? (
-                    <tr><td colSpan="7" style={{ textAlign: "center", color: "var(--text-3)", padding: 24 }}>{whTx(t, "noEntries")}</td></tr>
+                    <tr><td colSpan={canManage ? 8 : 7} style={{ textAlign: "center", color: "var(--text-3)", padding: 24 }}>{whTx(t, "noEntries")}</td></tr>
                   ) : stockEntries.map((entry) => {
                     const currency = entry.currency || entry.item?.default_currency || "uzs";
                     return (
@@ -643,6 +800,13 @@ function WarehousePage() {
                         <td style={{ textAlign: "right", color: "var(--green)", fontWeight: 700 }}>{entry.total_cost ? whMoney(entry.total_cost, currency) : whMoney(whNum(entry.quantity) * whNum(entry.unit_cost), currency)}</td>
                         <td>{entry.supplier_name || "—"}</td>
                         <td><span className="tg-cell-sub">{fmtDate(entry.received_at || entry.created_at, true)}</span></td>
+                        {canManage && (
+                          <td>
+                            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                              <IconButton icon={<I.edit size={13} />} label={whTx(t, "editStock")} onClick={() => { setEditStock(entry); setStockOpen(true); }} />
+                            </div>
+                          </td>
+                        )}
                       </tr>
                     );
                   })}
@@ -667,13 +831,14 @@ function WarehousePage() {
                     <th style={{ textAlign: "right" }}>{whTx(t, "paidAmount")}</th>
                     <th>{whTx(t, "paymentType")}</th>
                     <th>{whTx(t, "soldAt")}</th>
+                    {canManage && <th style={{ width: 52 }}></th>}
                   </tr>
                 </thead>
                 <tbody>
                   {loadingSales ? (
-                    <tr><td colSpan="9"><SkeletonRows cols={9} rows={6} /></td></tr>
+                    <tr><td colSpan={canManage ? 10 : 9}><SkeletonRows cols={canManage ? 10 : 9} rows={6} /></td></tr>
                   ) : sales.length === 0 ? (
-                    <tr><td colSpan="9" style={{ textAlign: "center", color: "var(--text-3)", padding: 24 }}>{whTx(t, "noEntries")}</td></tr>
+                    <tr><td colSpan={canManage ? 10 : 9} style={{ textAlign: "center", color: "var(--text-3)", padding: 24 }}>{whTx(t, "noEntries")}</td></tr>
                   ) : sales.map((sale) => {
                     const currency = sale.currency || sale.item?.default_currency || "uzs";
                     return (
@@ -687,6 +852,13 @@ function WarehousePage() {
                         <td style={{ textAlign: "right" }}>{whMoney(sale.paid_amount, currency)}</td>
                         <td><Badge color={whPayTypeColor(sale.payment_type)} size="sm">{whPayTypeLabel(t, sale.payment_type)}</Badge></td>
                         <td><span className="tg-cell-sub">{fmtDate(sale.sold_at || sale.created_at, true)}</span></td>
+                        {canManage && (
+                          <td>
+                            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                              <IconButton icon={<I.edit size={13} />} label={whTx(t, "editSale")} onClick={() => { setEditSale(sale); setSaleOpen(true); }} />
+                            </div>
+                          </td>
+                        )}
                       </tr>
                     );
                   })}
@@ -712,25 +884,37 @@ function WarehousePage() {
       />
       <StockEntryModal
         open={stockOpen}
+        initial={editStock}
         items={items}
         t={t}
-        onClose={() => setStockOpen(false)}
+        onClose={() => { setStockOpen(false); setEditStock(null); }}
         onSave={async (payload) => {
-          await apiCreateStockEntry(payload);
-          toast(whTx(t, "stockCreated"), "success");
+          if (editStock) {
+            await apiUpdateStockEntry(editStock.id, payload);
+            toast(whTx(t, "stockUpdated"), "success");
+          } else {
+            await apiCreateStockEntry(payload);
+            toast(whTx(t, "stockCreated"), "success");
+          }
           setTab("stock");
           refresh();
         }}
       />
       <SaleModal
         open={saleOpen}
+        initial={editSale}
         items={items}
         customers={data.customers || []}
         t={t}
-        onClose={() => setSaleOpen(false)}
+        onClose={() => { setSaleOpen(false); setEditSale(null); }}
         onSave={async (payload) => {
-          await apiCreateWarehouseSale(payload);
-          toast(whTx(t, "saleCreated"), "success");
+          if (editSale) {
+            await apiUpdateWarehouseSale(editSale.id, payload);
+            toast(whTx(t, "saleUpdated"), "success");
+          } else {
+            await apiCreateWarehouseSale(payload);
+            toast(whTx(t, "saleCreated"), "success");
+          }
           setTab("sales");
           refresh();
         }}
@@ -754,18 +938,32 @@ function WarehousePage() {
 window.WarehousePage = WarehousePage;
 
 function WarehouseItemDetailPage({ id }) {
-  const { t, nav } = useApp();
+  const { data, t, toast, nav } = useApp();
+  const canManage = canDo("warehouse.manage", data);
   const [item, setItem] = whS(null);
   const [loading, setLoading] = whS(true);
   const [tab, setTab] = whS("sales");
+  const [items, setItems] = whS([]);
+  const [editStock, setEditStock] = whS(null);
+  const [editSale, setEditSale] = whS(null);
+  const [tick, setTick] = whS(0);
+  const loadedIdRef = React.useRef(null);
 
   whE(() => {
-    setLoading(true);
+    // Full skeleton only on first load of this item; refetch after edit keeps the page visible
+    if (loadedIdRef.current !== id) setLoading(true);
     apiGetWarehouseItemDetail(id)
-      .then(res => setItem(res))
+      .then(res => { setItem(res); loadedIdRef.current = id; })
       .catch(() => setItem(null))
       .finally(() => setLoading(false));
-  }, [id]);
+  }, [id, tick]);
+
+  whE(() => {
+    if (!canManage) return;
+    apiGetWarehouseItems().then(res => setItems(res.results || [])).catch(() => setItems([]));
+  }, [canManage, tick]);
+
+  const withItemRef = (row) => ({ ...row, item: row.item || item.id, item_name: row.item_name || item.name, currency: row.currency || item.default_currency });
 
   if (loading) return (
     <div className="page fade-in">
@@ -852,11 +1050,12 @@ function WarehouseItemDetailPage({ id }) {
                     <th style={{ textAlign: "right" }}>{whTx(t, "totalAmount")}</th>
                     <th style={{ textAlign: "right" }}>{whTx(t, "paidAmount")}</th>
                     <th>{whTx(t, "paymentType")}</th>
+                    {canManage && <th style={{ width: 52 }}></th>}
                   </tr>
                 </thead>
                 <tbody>
                   {salesHistory.length === 0 ? (
-                    <tr><td colSpan="7" style={{ textAlign: "center", color: "var(--text-3)", padding: 24 }}>{whTx(t, "noEntries")}</td></tr>
+                    <tr><td colSpan={canManage ? 8 : 7} style={{ textAlign: "center", color: "var(--text-3)", padding: 24 }}>{whTx(t, "noEntries")}</td></tr>
                   ) : salesHistory.map((sale, i) => {
                     const cur = sale.currency || item.default_currency || "uzs";
                     return (
@@ -871,6 +1070,13 @@ function WarehouseItemDetailPage({ id }) {
                         <td style={{ textAlign: "right", color: "var(--green)", fontWeight: 700 }}>{whMoney(sale.total_amount || whNum(sale.quantity) * whNum(sale.unit_price), cur)}</td>
                         <td style={{ textAlign: "right" }}>{whMoney(sale.paid_amount, cur)}</td>
                         <td><Badge color={whPayTypeColor(sale.payment_type)} size="sm">{whPayTypeLabel(t, sale.payment_type)}</Badge></td>
+                        {canManage && (
+                          <td>
+                            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                              {sale.id && <IconButton icon={<I.edit size={13} />} label={whTx(t, "editSale")} onClick={() => setEditSale(withItemRef(sale))} />}
+                            </div>
+                          </td>
+                        )}
                       </tr>
                     );
                   })}
@@ -892,11 +1098,12 @@ function WarehouseItemDetailPage({ id }) {
                     <th style={{ textAlign: "right" }}>{whTx(t, "totalCost")}</th>
                     <th>{whTx(t, "supplier")}</th>
                     <th>{whTx(t, "notes")}</th>
+                    {canManage && <th style={{ width: 52 }}></th>}
                   </tr>
                 </thead>
                 <tbody>
                   {stockHistory.length === 0 ? (
-                    <tr><td colSpan="6" style={{ textAlign: "center", color: "var(--text-3)", padding: 24 }}>{whTx(t, "noEntries")}</td></tr>
+                    <tr><td colSpan={canManage ? 7 : 6} style={{ textAlign: "center", color: "var(--text-3)", padding: 24 }}>{whTx(t, "noEntries")}</td></tr>
                   ) : stockHistory.map((entry, i) => {
                     const cur = entry.currency || item.default_currency || "uzs";
                     return (
@@ -907,6 +1114,13 @@ function WarehouseItemDetailPage({ id }) {
                         <td style={{ textAlign: "right", color: "var(--green)", fontWeight: 700 }}>{whMoney(entry.total_cost || whNum(entry.quantity) * whNum(entry.unit_cost), cur)}</td>
                         <td>{entry.supplier_name || "—"}</td>
                         <td style={{ color: "var(--text-3)" }}>{entry.notes || "—"}</td>
+                        {canManage && (
+                          <td>
+                            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                              {entry.id && <IconButton icon={<I.edit size={13} />} label={whTx(t, "editStock")} onClick={() => setEditStock(withItemRef(entry))} />}
+                            </div>
+                          </td>
+                        )}
                       </tr>
                     );
                   })}
@@ -916,6 +1130,34 @@ function WarehouseItemDetailPage({ id }) {
           </Card>
         )}
       </div>
+
+      {canManage && <>
+        <StockEntryModal
+          open={!!editStock}
+          initial={editStock}
+          items={items}
+          t={t}
+          onClose={() => setEditStock(null)}
+          onSave={async (payload) => {
+            await apiUpdateStockEntry(editStock.id, payload);
+            toast(whTx(t, "stockUpdated"), "success");
+            setTick((value) => value + 1);
+          }}
+        />
+        <SaleModal
+          open={!!editSale}
+          initial={editSale}
+          items={items}
+          customers={data.customers || []}
+          t={t}
+          onClose={() => setEditSale(null)}
+          onSave={async (payload) => {
+            await apiUpdateWarehouseSale(editSale.id, payload);
+            toast(whTx(t, "saleUpdated"), "success");
+            setTick((value) => value + 1);
+          }}
+        />
+      </>}
     </div>
   );
 }

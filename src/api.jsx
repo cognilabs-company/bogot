@@ -302,7 +302,12 @@ async function apiRequest(path, options = {}) {
     };
   }
   const payload = await apiSafeJson(response);
-  if (!response.ok) throw new Error(apiErrorMessage(payload));
+  if (!response.ok) {
+    const error = new Error(apiErrorMessage(payload));
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
+  }
   return payload;
 }
 
@@ -530,6 +535,19 @@ async function apiCreateStockEntry(entry) {
   return apiUnwrap(await apiRequest("/api/warehouse/stock-entries/", { method: "POST", body: payload, auth: true }));
 }
 
+async function apiUpdateStockEntry(id, entry) {
+  const payload = {
+    item: entry.item,
+    quantity: String(apiParseNumber(entry.quantity)),
+    currency: entry.currency || "uzs",
+    supplier_name: entry.supplier_name || "",
+    notes: entry.notes || "",
+  };
+  if (entry.unit_cost !== "" && entry.unit_cost != null) payload.unit_cost = String(entry.unit_cost);
+  if (entry.received_at) payload.received_at = entry.received_at;
+  return apiUnwrap(await apiRequest(`/api/warehouse/stock-entries/${id}/`, { method: "PATCH", body: payload, auth: true }));
+}
+
 async function apiGetWarehouseSales(params = {}) {
   try {
     const url = apiBuildUrl("/api/warehouse/sales/", { page_size: 100, ordering: "-sold_at", ...params });
@@ -553,6 +571,23 @@ async function apiCreateWarehouseSale(sale) {
   if (sale.sold_at) payload.sold_at = sale.sold_at;
   if (sale.notes) payload.notes = sale.notes;
   return apiUnwrap(await apiRequest("/api/warehouse/sales/", { method: "POST", body: payload, auth: true }));
+}
+
+async function apiUpdateWarehouseSale(id, sale) {
+  const payload = {
+    item: sale.item,
+    client: sale.client || null,
+    client_name: sale.client_name || "",
+    client_phone: sale.client_phone || "",
+    quantity: String(apiParseNumber(sale.quantity)),
+    currency: sale.currency || "uzs",
+    unit_price: String(sale.unit_price),
+    paid_amount: String(sale.paid_amount || 0),
+    payment_type: sale.payment_type || "cash",
+    notes: sale.notes || "",
+  };
+  if (sale.sold_at) payload.sold_at = sale.sold_at;
+  return apiUnwrap(await apiRequest(`/api/warehouse/sales/${id}/`, { method: "PATCH", body: payload, auth: true }));
 }
 
 async function apiSaveDistrict(district) {
@@ -1510,8 +1545,10 @@ Object.assign(window, {
   apiDownloadWarehouseExcel,
   apiGetStockEntries,
   apiCreateStockEntry,
+  apiUpdateStockEntry,
   apiGetWarehouseSales,
   apiCreateWarehouseSale,
+  apiUpdateWarehouseSale,
   apiGetAccountingStats,
   apiUiRole,
   apiLoadSession,
