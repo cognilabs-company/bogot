@@ -20,7 +20,7 @@ function Placeholder({ label }) {
 }
 
 function Router() {
-  const { authed, role, dataLoading, data, lang } = useApp();
+  const { authed, role, dataLoading, data, lang, toast } = useApp();
   const [route, nav] = useRoute();
   const [mobileOpen, setMobileOpen] = aS(false);
   const [cmdOpen, setCmdOpen] = aS(false);

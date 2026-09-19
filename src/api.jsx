@@ -379,8 +379,8 @@ async function apiGetClientsPage(params = {}) {
 }
 
 async function apiGetDebtorsPage(params = {}) {
-  const { page = 1, page_size = 50, search, debtor_type, district, neighborhood, ordering } = params;
-  const url = apiBuildUrl("/api/clients/debtors/", { page, page_size, search, debtor_type, district, neighborhood, ordering });
+  const { page = 1, page_size = 50, search, debtor_type, district, neighborhood, ordering, status } = params;
+  const url = apiBuildUrl("/api/clients/debtors/", { page, page_size, search, debtor_type, district, neighborhood, ordering, status });
   const res = apiUnwrap(await apiRequest(url, { auth: true }));
   return { results: (res?.results || []).map(mapApiDebtor), count: res?.count || 0 };
 }
@@ -404,6 +404,13 @@ async function apiGetAccountingStats(params = {}) {
     const url = apiBuildUrl("/api/clients/accounting/stats/", params);
     return apiUnwrap(await apiRequest(url, { auth: true })) || {};
   } catch { return {}; }
+}
+
+async function apiGetDebtorStats(params = {}) {
+  try {
+    const url = apiBuildUrl("/api/clients/debtors/stats/", params);
+    return apiUnwrap(await apiRequest(url, { auth: true })) || null;
+  } catch { return null; }
 }
 
 async function apiGetDebtorById(id) {
@@ -709,6 +716,8 @@ function mapApiClient(client) {
   };
 }
 
+const DEBTOR_STATUSES = ["active", "sud", "mib"];
+
 function mapApiDebtor(debtor) {
   const debt = apiParseNumber(debtor.debt_amount);
   const paid = apiParseNumber(debtor.total_paid_amount ?? debtor.paid_amount);
@@ -745,6 +754,7 @@ function mapApiDebtor(debtor) {
     debtorType: debtor.debtor_type,
     recallAt: debtor.recall_at || null,
     sourceNumber: debtor.source_number != null ? Number(debtor.source_number) : null,
+    debtorStatus: DEBTOR_STATUSES.includes(debtor.status) ? debtor.status : "active",
   };
 }
 
@@ -1224,6 +1234,7 @@ async function apiSaveDebtor(order) {
     debt_taken_on: apiDateOnly(order.createdAt || new Date().toISOString()),
     repayment_due_date: dueDate,
     notes: order.note || "",
+    status: DEBTOR_STATUSES.includes(order.debtorStatus) ? order.debtorStatus : "active",
   };
   if (order.sourceNumber != null && order.sourceNumber !== "") payload.source_number = Number(order.sourceNumber);
   if (order.recallAt) payload.recall_at = new Date(order.recallAt).toISOString();
@@ -1531,6 +1542,8 @@ Object.assign(window, {
   apiGetPaymentsPage,
   apiGetClientById,
   apiGetDebtorById,
+  apiGetDebtorStats,
+  DEBTOR_STATUSES,
   apiGetDebtorPayments,
   apiSaveDebtorPayment,
   apiDeleteDebtorPayment,

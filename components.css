@@ -1258,3 +1258,17 @@ button.product-photo {
 .cn-penalty-suffix { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 12.5px; color: var(--text-3); pointer-events: none; }
 .cn-penalty-preview { font-size: 12.5px; line-height: 1.5; color: var(--text-2); padding: 9px 12px; border-radius: 8px; background: var(--surface); border: 1px dashed var(--border); }
 .cn-penalty-preview b { color: var(--red); font-weight: 650; }
+
+/* ===== Debtors: status cards (Aktiv / Sud / MIB) ===== */
+.debtor-status-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--grid-gap, 16px); }
+.debtor-status-card { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); text-align: left; cursor: pointer; position: relative; transition: border-color .15s, background .15s, box-shadow .15s; font: inherit; }
+.debtor-status-card:hover { border-color: var(--card-color); background: var(--surface); }
+.debtor-status-card.is-active { border-color: var(--card-color); background: var(--card-bg); box-shadow: 0 0 0 3px var(--card-bg); }
+.debtor-status-card-icon { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; flex-shrink: 0; color: var(--card-color); background: var(--card-bg); }
+.debtor-status-card.is-active .debtor-status-card-icon { background: var(--card-color); color: #fff; }
+.debtor-status-card-body { display: grid; gap: 2px; min-width: 0; }
+.debtor-status-card-label { font-size: 12px; color: var(--text-3); font-weight: 540; }
+.debtor-status-card-value { font-size: 22px; font-weight: 720; letter-spacing: -.02em; line-height: 1.1; color: var(--card-color); }
+.debtor-status-card-check { position: absolute; top: 8px; right: 8px; width: 18px; height: 18px; border-radius: 999px; display: grid; place-items: center; background: var(--card-color); color: #fff; }
+@media (max-width: 1200px) { .debtor-status-cards { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 640px)  { .debtor-status-cards { grid-template-columns: 1fr; } }

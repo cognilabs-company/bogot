@@ -56,6 +56,9 @@ const COMMERCE_UI = {
     dropOrClick: "Fayl tanlash yoki tashlang",
     recallAt: "Qo'ng'iroq vaqti", tabRecall: "Qo'ng'iroq", recallOverdue: "Kechikkan", recallToday: "Bugun", recallSet: "Qo'ng'iroq belgilangan", clearRecall: "Qo'ng'iroqni tozalash",
     colSourceNum: "Raqam", sortSourceAsc: "Raqam ↑", sortSourceDesc: "Raqam ↓",
+    debtorStatus: "Status", statusActive: "Aktiv", statusSud: "Sud", statusMib: "MIB",
+    kpiTotalDebtors: "Jami qarzdorlar", kpiActive: "Aktiv", kpiSud: "Sud", kpiMib: "MIB",
+    statusCardsHint: "Status bo'yicha filtrlash uchun kartani bosing",
   },
   ru: {
     overdue: "Просрочено", withDebt: "Есть остаток", closed: "Закрыто",
@@ -112,6 +115,9 @@ const COMMERCE_UI = {
     dropOrClick: "Выберите файл или перетащите",
     recallAt: "Время перезвона", tabRecall: "Перезвонить", recallOverdue: "Просрочено", recallToday: "Сегодня", recallSet: "Перезвон назначен", clearRecall: "Снять перезвон",
     colSourceNum: "Номер", sortSourceAsc: "Номер ↑", sortSourceDesc: "Номер ↓",
+    debtorStatus: "Статус", statusActive: "Активный", statusSud: "Суд", statusMib: "МИБ",
+    kpiTotalDebtors: "Всего должников", kpiActive: "Активные", kpiSud: "Суд", kpiMib: "МИБ",
+    statusCardsHint: "Нажмите на карточку, чтобы отфильтровать по статусу",
   },
   en: {
     overdue: "Overdue", withDebt: "Has balance", closed: "Closed",
@@ -168,6 +174,9 @@ const COMMERCE_UI = {
     dropOrClick: "Click to select or drag & drop",
     recallAt: "Callback time", tabRecall: "Recall", recallOverdue: "Overdue", recallToday: "Today", recallSet: "Recall scheduled", clearRecall: "Clear recall",
     colSourceNum: "No.", sortSourceAsc: "No. ↑", sortSourceDesc: "No. ↓",
+    debtorStatus: "Status", statusActive: "Active", statusSud: "Court", statusMib: "MIB",
+    kpiTotalDebtors: "Total debtors", kpiActive: "Active", kpiSud: "Court", kpiMib: "MIB",
+    statusCardsHint: "Click a card to filter by status",
   },
 };
 function comLang() { return window.__TG_LANG || "uz"; }
@@ -189,6 +198,34 @@ function fmtRecallDate(iso, short = false) {
   const date = d.toLocaleDateString(locale, short ? { day: "numeric", month: "short" } : { day: "numeric", month: "long", year: "numeric" });
   return `${date}, ${time}`;
 }
+const DEBTOR_STATUS_META = {
+  active: { key: "statusActive", color: "green", icon: "checkCircle" },
+  sud: { key: "statusSud", color: "red", icon: "shield" },
+  mib: { key: "statusMib", color: "violet", icon: "alert" },
+};
+const debtorStatusOf = (order) => (order?.debtorStatus && DEBTOR_STATUS_META[order.debtorStatus] ? order.debtorStatus : "active");
+const debtorStatusLabel = (value) => comTx(DEBTOR_STATUS_META[value]?.key || "statusActive");
+const debtorStatusColor = (value) => DEBTOR_STATUS_META[value]?.color || "slate";
+const debtorStatusOptions = () => Object.keys(DEBTOR_STATUS_META).map((value) => ({ value, label: debtorStatusLabel(value) }));
+
+function DebtorStatusBadge({ value, size = "sm" }) {
+  return <Badge color={debtorStatusColor(value)} size={size}>{debtorStatusLabel(value)}</Badge>;
+}
+
+function DebtorStatusCard({ label, value, color, icon, active, loading, onClick }) {
+  const Ico = I[icon] || I.users;
+  return (
+    <button type="button" className={`debtor-status-card${active ? " is-active" : ""}`} style={{ "--card-color": `var(--${color})`, "--card-bg": `var(--${color}-bg)` }} onClick={onClick} aria-pressed={active}>
+      <span className="debtor-status-card-icon"><Ico size={17} /></span>
+      <span className="debtor-status-card-body">
+        <span className="debtor-status-card-label">{label}</span>
+        <strong className="debtor-status-card-value">{loading ? "…" : value}</strong>
+      </span>
+      {active && <span className="debtor-status-card-check"><I.check size={12} /></span>}
+    </button>
+  );
+}
+
 const debtNum = (value) => {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
@@ -287,6 +324,7 @@ OrderRow = function OrderRowPatched({ o, onClick, onEdit, onDelete, onAddPayment
           {!!subMetaParts.length && <div className="tg-cell-sub">{subMetaParts.join(" • ")}</div>}
         </div>
         {hasOrderLocation(o) && <Badge color="slate" size="sm">{orderMahalla(o) || orderTuman(o)}</Badge>}
+        {debtorStatusOf(o) !== "active" && <DebtorStatusBadge value={debtorStatusOf(o)} />}
         {recallBadge && <Badge color={recallBadge.color} size="sm" title={o.recallAt}>📞 {recallBadge.label} {recallBadge.time}</Badge>}
         <Badge color={overdueAmount > 0 ? "red" : remainingDebt > 0 ? "amber" : "green"} size="sm">
           {overdueAmount > 0 ? comTx("overdue") : remainingDebt > 0 ? comTx("withDebt") : comTx("closed")}
@@ -333,8 +371,11 @@ function OrdersPage() {
   const [ordLoading, setOrdLoading] = coS(false);
   const [listRefreshTick, setListRefreshTick] = coS(0);
   const [sourceNumSort, setSourceNumSort] = coS("all"); // "all" | "asc" | "desc"
+  const [debtorStatusFilter, setDebtorStatusFilter] = coS("all"); // "all" | "active" | "sud" | "mib"
+  const [statusStats, setStatusStats] = coS(null);
+  const [statusStatsLoading, setStatusStatsLoading] = coS(true);
 
-  coE(() => { setOrdPage(1); setOrdRows([]); setOrdTotal(0); }, [q, debtorTypeFilter, sourceNumSort]);
+  coE(() => { setOrdPage(1); setOrdRows([]); setOrdTotal(0); }, [q, debtorTypeFilter, sourceNumSort, debtorStatusFilter]);
 
   coE(() => {
     let cancelled = false;
@@ -344,6 +385,7 @@ function OrdersPage() {
       page_size: 50,
       search: q.startsWith("#") ? undefined : q || undefined,
       debtor_type: debtorTypeFilter !== "all" ? debtorTypeFilter : undefined,
+      status: debtorStatusFilter !== "all" ? debtorStatusFilter : undefined,
       ordering: sourceNumSort === "asc" ? "source_number" : sourceNumSort === "desc" ? "-source_number" : undefined,
     }).then(({ results, count }) => {
       if (cancelled) return;
@@ -352,7 +394,24 @@ function OrdersPage() {
       setOrdLoading(false);
     }).catch(() => { if (!cancelled) setOrdLoading(false); });
     return () => { cancelled = true; };
-  }, [ordPage, q, debtorTypeFilter, sourceNumSort, listRefreshTick]);
+  }, [ordPage, q, debtorTypeFilter, sourceNumSort, debtorStatusFilter, listRefreshTick]);
+
+  // Status counts come from the backend; the same list filters (except status itself) narrow the counts
+  coE(() => {
+    let cancelled = false;
+    setStatusStatsLoading(true);
+    apiGetDebtorStats({
+      search: q.startsWith("#") ? undefined : q || undefined,
+      debtor_type: debtorTypeFilter !== "all" ? debtorTypeFilter : undefined,
+      district: districtFilter !== "all" ? districtFilter : undefined,
+      neighborhood: mahallaFilter !== "all" ? mahallaFilter : undefined,
+    }).then((res) => {
+      if (cancelled) return;
+      setStatusStats(res);
+      setStatusStatsLoading(false);
+    }).catch(() => { if (!cancelled) setStatusStatsLoading(false); });
+    return () => { cancelled = true; };
+  }, [q, debtorTypeFilter, districtFilter, mahallaFilter, listRefreshTick]);
 
   const allOrders = data.orders || [];
   const districts = coM(() => [...new Set(allOrders.map((order) => orderTuman(order)).filter(Boolean))].sort((a, b) => a.localeCompare(b, "uz")), [allOrders]);
@@ -382,6 +441,7 @@ function OrdersPage() {
       await apiDownloadDebtorsExcel({
         search: q || undefined,
         debtor_type: debtorTypeFilter !== "all" ? debtorTypeFilter : undefined,
+        status: debtorStatusFilter !== "all" ? debtorStatusFilter : undefined,
         district: districtFilter !== "all" ? districtFilter : undefined,
         neighborhood: mahallaFilter !== "all" ? mahallaFilter : undefined,
         date_from: dateFrom || undefined,
@@ -414,11 +474,13 @@ function OrdersPage() {
     if (statusTab === "open" && debtNum(o.remainingDebtUzs) <= 0) return false;
     if (statusTab === "closed" && debtNum(o.remainingDebtUzs) > 0) return false;
     if (statusTab === "recall" && !o.recallAt) return false;
+    if (debtorStatusFilter !== "all" && debtorStatusOf(o) !== debtorStatusFilter) return false;
+    if (debtorTypeFilter !== "all" && o.debtorType !== debtorTypeFilter && !(debtorTypeFilter === "solar_business" && o.debtorType === "solar_panel")) return false;
     if (showLocationFilters && districtFilter !== "all" && orderTuman(o) !== districtFilter) return false;
     if (showLocationFilters && mahallaFilter !== "all" && orderMahalla(o) !== mahallaFilter) return false;
     if (!orderDateMatchesRange(orderTakenDate(o), dateFrom, dateTo)) return false;
     return true;
-  }), [allOrders, q, statusTab, showLocationFilters, districtFilter, mahallaFilter, dateFrom, dateTo]);
+  }), [allOrders, q, statusTab, showLocationFilters, districtFilter, mahallaFilter, dateFrom, dateTo, debtorStatusFilter, debtorTypeFilter]);
 
   // filtered: server-paginated ordRows — used only for flat table view (statusTab === "all")
   const filtered = coM(() => ordRows.filter(o => {
@@ -489,6 +551,11 @@ function OrdersPage() {
 
   const totalDebt = allOrders.reduce((sum, o) => sum + debtNum(o.remainingDebtUzs), 0);
   const overdue = allOrders.reduce((sum, o) => sum + debtNum(o.overdueAmountUzs), 0);
+  const statusCount = (key) => {
+    const value = statusStats?.[key === "total" ? "total" : `${key}_count`];
+    return value != null ? fmtNum(Number(value)) : "—";
+  };
+  const toggleStatusFilter = (value) => setDebtorStatusFilter((current) => (current === value ? "all" : value));
   const tabs = [
     { value: "all", label: comTx("tabAll"), count: ordTotal },
     { value: "open", label: comTx("tabOpen"), count: allOrders.filter(o => debtNum(o.remainingDebtUzs) > 0).length },
@@ -509,9 +576,16 @@ function OrdersPage() {
         <StatTile label={comTx("creditCustomers")} value={allOrders.filter(o => o.paymentType === "credit").length} color="blue" />
         <StatTile label={comTx("districts")} value={new Set(allOrders.map(o => orderTuman(o)).filter(Boolean)).size} color="violet" />
       </div>
+      <div className="debtor-status-cards" style={{ marginBottom: 18 }} title={comTx("statusCardsHint")}>
+        <DebtorStatusCard label={comTx("kpiTotalDebtors")} value={statusCount("total")} color="blue" icon="users" active={debtorStatusFilter === "all"} loading={statusStatsLoading} onClick={() => setDebtorStatusFilter("all")} />
+        <DebtorStatusCard label={comTx("kpiActive")} value={statusCount("active")} color="green" icon="checkCircle" active={debtorStatusFilter === "active"} loading={statusStatsLoading} onClick={() => toggleStatusFilter("active")} />
+        <DebtorStatusCard label={comTx("kpiSud")} value={statusCount("sud")} color="red" icon="shield" active={debtorStatusFilter === "sud"} loading={statusStatsLoading} onClick={() => toggleStatusFilter("sud")} />
+        <DebtorStatusCard label={comTx("kpiMib")} value={statusCount("mib")} color="violet" icon="alert" active={debtorStatusFilter === "mib"} loading={statusStatsLoading} onClick={() => toggleStatusFilter("mib")} />
+      </div>
       <div className="toolbar">
         <SearchInput value={q} onChange={setQ} placeholder={comTx("debtorsSearch")} width={260} />
         <FilterSelect label={comTx("filterDebtorType")} icon="layers" value={debtorTypeFilter} onChange={setDebtorTypeFilter} options={[{ value: "moto_business", label: comTx("oldBiz") }, { value: "solar_business", label: comTx("solar") }]} />
+        <FilterSelect label={comTx("debtorStatus")} icon="shield" value={debtorStatusFilter} onChange={setDebtorStatusFilter} options={debtorStatusOptions()} />
         {showLocationFilters && <FilterSelect label={comTx("colDistrict")} icon="mapPin" value={districtFilter} onChange={setDistrictFilter} options={districtOptions} />}
         {showLocationFilters && <FilterSelect label={comTx("colMahalla")} icon="home" value={mahallaFilter} onChange={setMahallaFilter} options={mahallaOptions} />}
         <div style={{ width: 170 }}><DatePickerInput value={dateFrom} onChange={setDateFrom} placeholder={comTx("startDate")} /></div>
@@ -537,6 +611,7 @@ function OrdersPage() {
               { key: "district", label: comTx("colDistrict"), sortVal: (row) => orderTuman(row), render: (row) => orderTuman(row) || <span className="tg-cell-sub">—</span> },
               { key: "mahalla", label: comTx("colMahalla"), sortVal: (row) => orderMahalla(row), render: (row) => orderMahalla(row) || <span className="tg-cell-sub">—</span> },
               { key: "type", label: comTx("filterDebtorType"), sortVal: (row) => row.debtorType || "", render: (row) => (row.debtorType === "solar_business" || row.debtorType === "solar_panel") ? <Badge color="blue" size="sm">{comTx("solar")}</Badge> : row.debtorType === "moto_business" ? <Badge color="amber" size="sm">{comTx("oldBiz")}</Badge> : <span className="tg-cell-sub">—</span> },
+              { key: "debtorStatus", label: comTx("debtorStatus"), sortVal: (row) => ({ active: 0, sud: 1, mib: 2 })[debtorStatusOf(row)], render: (row) => <DebtorStatusBadge value={debtorStatusOf(row)} /> },
               { key: "status", label: comTx("colStatus"), sortVal: (row) => debtNum(row.overdueAmountUzs) > 0 ? 2 : debtNum(row.remainingDebtUzs) > 0 ? 1 : 0, render: (row) => { const ov = debtNum(row.overdueAmountUzs); const rem = debtNum(row.remainingDebtUzs); return <Badge color={ov > 0 ? "red" : rem > 0 ? "amber" : "green"} size="sm">{ov > 0 ? comTx("overdue") : rem > 0 ? comTx("withDebt") : comTx("closed")}</Badge>; } },
               { key: "debt", label: comTx("colDebt"), sortVal: (row) => debtNum(row.remainingDebtUzs), render: (row) => <span style={{ fontWeight: 700 }}>{rawDebt(row.remainingDebtUzs) ?? "—"}</span> },
             ]}
@@ -695,6 +770,7 @@ function OrderFormModal({ open, onClose, onSave, initial, locations }) {
     note: "",
     recallAt: null,
     sourceNumber: "",
+    debtorStatus: "active",
   };
   const normalizeLocation = (item) => {
     const district = item?.district || "";
@@ -787,6 +863,7 @@ function OrderFormModal({ open, onClose, onSave, initial, locations }) {
             createdAt: form.createdAt || new Date().toISOString(),
             recallAt: form.recallAt || null,
             sourceNumber: form.sourceNumber !== "" && form.sourceNumber != null ? Number(form.sourceNumber) : null,
+            debtorStatus: debtorStatusOf(form),
           });
         }}>{initial ? comTx("save") : comTx("create")}</Button>
       </>}>
@@ -797,10 +874,13 @@ function OrderFormModal({ open, onClose, onSave, initial, locations }) {
           <Field label={comTx("colDistrict")}><Input value={form.district} onChange={e => { set("district", e.target.value); set("mahalla", ""); }} placeholder={comTx("districtPh")} /></Field>
           <Field label={comTx("colSourceNum")}><Input type="number" value={form.sourceNumber ?? ""} onChange={e => set("sourceNumber", e.target.value)} placeholder="#" /></Field>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 14 }}>
           <Field label={comTx("colMahalla")}><Input value={form.mahalla} onChange={e => set("mahalla", e.target.value)} placeholder={comTx("mahallaPh")} /></Field>
           <Field label={comTx("direction")}><Select value={form.businessLine} onChange={v => set("businessLine", v)} options={[{ value: "Quyosh panel biznesi", label: comTx("solar") }, { value: "Moto biznes", label: comTx("oldBiz") }]} /></Field>
           <Field label={comTx("paymentType")}><Select value={form.paymentType} onChange={v => set("paymentType", v)} options={[{ value: "credit", label: comTx("credit") }, { value: "cash", label: comTx("cash") }]} /></Field>
+          <Field label={comTx("debtorStatus")}>
+            <Select value={debtorStatusOf(form)} onChange={v => set("debtorStatus", v)} options={debtorStatusOptions()} />
+          </Field>
         </div>
         {(!!districts.length || isNewDistrict) && (
           <div style={{ display: "grid", gap: 8 }}>
@@ -1202,12 +1282,14 @@ function OrderDetailPage({ id }) {
   return (
     <div className="page fade-in">
       <PageHeader crumbs={[{ label: comTx("catalogCrumb") }, { label: t("page.orders"), to: "/debtors" }, { label: o.customerName }]} title={o.customerName}
+        desc={debtorStatusOf(o) !== "active" ? <DebtorStatusBadge value={debtorStatusOf(o)} size="md" /> : undefined}
         actions={<Button variant="primary" size="sm" icon={<I.edit size={15} />} onClick={() => setEditOpen(true)}>{comTx("edit")}</Button>} />
       <div className="grid-dash">
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <Panel title={comTx("debtPanel")} icon="wallet" color="amber">
             <div className="tg-meta">
               {o.sourceNumber != null && <div className="tg-meta-row"><span className="tg-meta-k">{comTx("colSourceNum")}</span><span className="tg-meta-v" style={{ fontWeight: 700 }}>#{o.sourceNumber}</span></div>}
+              <div className="tg-meta-row"><span className="tg-meta-k">{comTx("debtorStatus")}</span><span className="tg-meta-v"><DebtorStatusBadge value={debtorStatusOf(o)} size="md" /></span></div>
               <div className="tg-meta-row"><span className="tg-meta-k">{comTx("businessLine")}</span><span className="tg-meta-v">{o.businessLine}</span></div>
               {!!o.phone && <div className="tg-meta-row"><span className="tg-meta-k">{comTx("phoneLabel")}</span><span className="tg-meta-v">{o.phone}</span></div>}
               {!!orderTuman(o) && <div className="tg-meta-row"><span className="tg-meta-k">{comTx("colDistrict")}</span><span className="tg-meta-v">{orderTuman(o)}</span></div>}
