@@ -105,12 +105,262 @@ function Logo({ compact }) {
 }
 window.Logo = Logo;
 
+// ---------- Sidebar "wind" indicator ----------
+// One shared ribbon that flows between nav links. On navigation the edge facing
+// the travel direction leads (fast spring), the trailing edge follows later with
+// a softer spring, so the ribbon stretches like a gust and then settles.
+const WIND_MS = 600;
+const WIND_FRAMES = 48;
+const WIND_LEAD = { delay: 0, w: 22, z: 0.62, cap: 5 };
+const WIND_TRAIL = { delay: 0.09, w: 11, z: 0.8, cap: 3 };
+
+function windSpring(u, w, z) {
+  if (u <= 0) return 0;
+  const wd = w * Math.sqrt(1 - z * z);
+  return 1 - Math.exp(-z * w * u) * (Math.cos(wd * u) + (z * w / wd) * Math.sin(wd * u));
+}
+// Normalised spring progress: exactly 1 at the end, overshoot capped in px.
+function windEdge(t, p, dist) {
+  const end = WIND_MS / 1000 - p.delay;
+  const u = Math.max(0, t - p.delay);
+  let s = windSpring(u, p.w, p.z);
+  s += (1 - windSpring(end, p.w, p.z)) * Math.pow(Math.min(1, u / end), 3);
+  if (s > 1 && dist > 0) {
+    const peak = Math.exp(-Math.PI * p.z / Math.sqrt(1 - p.z * p.z));
+    s = 1 + (s - 1) * Math.min(1, p.cap / (dist * peak));
+  }
+  return s;
+}
+const windLerp = (a, b, k) => a + (b - a) * k;
+
+function windBoxOf(el, nav) {
+  const r = el.getBoundingClientRect();
+  const n = nav.getBoundingClientRect();
+  return {
+    x: r.left - n.left - nav.clientLeft + nav.scrollLeft,
+    y: r.top - n.top - nav.clientTop + nav.scrollTop,
+    w: r.width,
+    h: r.height,
+  };
+}
+const windSame = (a, b) => !!a && !!b && Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) < 0.5 && Math.abs(a.w - b.w) < 0.5 && Math.abs(a.h - b.h) < 0.5;
+
+function useWindIndicator(navRef, windRef) {
+  const st = shR({ first: true, shown: false, path: null, box: null, axis: "y", flying: false, anims: [] });
+  const syncRef = shR(null);
+
+  const apply = (box) => {
+    const el = windRef.current, nav = navRef.current;
+    // where the accent bar sits: nav's inner left edge (sidebar) / bottom edge (topnav)
+    el.style.setProperty("--wind-x", box.x + "px");
+    el.style.setProperty("--wind-b", Math.max(0, nav.clientHeight - box.y - box.h + nav.scrollTop) + "px");
+    el.style.transform = `translate(${box.x}px, ${box.y}px)`;
+    el.style.width = box.w + "px";
+    el.style.height = box.h + "px";
+  };
+  const stopFlight = () => {
+    st.current.anims.forEach(a => a.cancel());
+    st.current.anims = [];
+    st.current.flying = false;
+    if (windRef.current) windRef.current.removeAttribute("data-flying");
+  };
+  const setShown = (on, instant) => {
+    const el = windRef.current;
+    if (instant) {
+      el.style.transition = "none";
+      el.setAttribute("data-shown", on ? "1" : "0");
+      void el.offsetWidth;
+      el.style.transition = "";
+    } else {
+      el.setAttribute("data-shown", on ? "1" : "0");
+    }
+    st.current.shown = on;
+  };
+
+  const fly = (from, to, item) => {
+    const el = windRef.current, s = st.current;
+    const axis = s.axis;
+    const P = axis === "y" ? ["y", "h", "x", "w"] : ["x", "w", "y", "h"];
+    const [pos, size, cpos, csize] = P;
+    const back = to[pos] < from[pos]; // up (or left): the start edge leads
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    apply(to);
+    el.setAttribute("data-dir", axis === "y" ? (back ? "up" : "down") : (back ? "left" : "right"));
+    const frame = (b) => ({ transform: `translate(${b.x}px, ${b.y}px)`, width: b.w + "px", height: b.h + "px" });
+
+    if (reduce) {
+      s.anims = [el.animate([frame(from), frame(to)], { duration: 160, easing: "ease-out" })];
+    } else {
+      const aStart = from[pos], aEnd = from[pos] + from[size];
+      const bStart = to[pos], bEnd = to[pos] + to[size];
+      const leadDist = back ? Math.abs(aStart - bStart) : Math.abs(aEnd - bEnd);
+      const trailDist = back ? Math.abs(aEnd - bEnd) : Math.abs(aStart - bStart);
+      const frames = [];
+      for (let i = 0; i <= WIND_FRAMES; i++) {
+        const t = (i / WIND_FRAMES) * (WIND_MS / 1000);
+        const kl = windEdge(t, WIND_LEAD, leadDist);
+        const kt = windEdge(t, WIND_TRAIL, trailDist);
+        let start = windLerp(aStart, bStart, back ? kl : kt);
+        let end = windLerp(aEnd, bEnd, back ? kt : kl);
+        if (end - start < 8) { const mid = (start + end) / 2; start = mid - 4; end = mid + 4; }
+        const kc = Math.min(1, kl);
+        const b = {};
+        b[pos] = start; b[size] = end - start;
+        b[cpos] = windLerp(from[cpos], to[cpos], kc);
+        b[csize] = windLerp(from[csize], to[csize], kc);
+        frames.push({ ...frame(b), offset: i / WIND_FRAMES });
+      }
+      const main = el.animate(frames, { duration: WIND_MS, easing: "linear" });
+      const fx = [];
+      const q = (sel) => el.querySelector(sel);
+      // brighter gust gradient + dimmer base tint while travelling
+      fx.push(q(".tg-wind-gust").animate([{ opacity: 0 }, { opacity: 1, offset: 0.12 }, { opacity: 0.85, offset: 0.5 }, { opacity: 0 }], { duration: WIND_MS, easing: "ease-out" }));
+      fx.push(q(".tg-wind-tint").animate([{ opacity: 1 }, { opacity: 0.45, offset: 0.15 }, { opacity: 0.6, offset: 0.55 }, { opacity: 1 }], { duration: WIND_MS, easing: "ease-in-out" }));
+      // streak lines blowing toward the leading edge
+      const sign = back ? -1 : 1;
+      const tr = (v) => axis === "y" ? `translateY(${v}%)` : `translateX(${v}%)`;
+      el.querySelectorAll(".tg-wind-streak").forEach((sk, i) => {
+        fx.push(sk.animate([
+          { transform: tr(-sign * 160), opacity: 0 },
+          { opacity: 0.9, offset: 0.35 },
+          { transform: tr(sign * 220), opacity: 0 },
+        ], { duration: 360 + i * 40, delay: 20 + i * 45, easing: "cubic-bezier(.2,.6,.3,1)", fill: "backwards" }));
+      });
+      // airy swirl on the destination icon + soft puff when the ribbon catches
+      const ico = item && item.querySelector("svg");
+      const puff = q(".tg-wind-puff");
+      if (ico) {
+        const ir = ico.getBoundingClientRect(), xr = item.getBoundingClientRect();
+        puff.style.left = (ir.left - xr.left + ir.width / 2) + "px";
+        puff.style.top = (ir.top - xr.top + ir.height / 2) + "px";
+        fx.push(ico.animate([
+          { transform: "rotate(0deg) scale(1)" },
+          { transform: "rotate(-16deg) scale(1.14)", offset: 0.45 },
+          { transform: "rotate(0deg) scale(1)" },
+        ], { duration: 420, delay: 230, easing: "cubic-bezier(.3,.7,.3,1)" }));
+        fx.push(puff.animate([
+          { transform: "translate(-50%,-50%) scale(.3)", opacity: 0 },
+          { opacity: 0.55, offset: 0.3 },
+          { transform: "translate(-50%,-50%) scale(1.5)", opacity: 0 },
+        ], { duration: 520, delay: 220, easing: "ease-out", fill: "backwards" }));
+      }
+      s.anims = [main, ...fx];
+    }
+    s.flying = true;
+    el.setAttribute("data-flying", "1");
+    const main = s.anims[0];
+    main.onfinish = () => {
+      if (s.anims[0] !== main) return;
+      s.flying = false;
+      el.removeAttribute("data-flying");
+      syncRef.current && syncRef.current();
+    };
+  };
+
+  const sync = () => {
+    const nav = navRef.current, el = windRef.current, s = st.current;
+    if (!nav || !el) return;
+    const axis = document.documentElement.getAttribute("data-layout") === "topnav" ? "x" : "y";
+    const item = nav.querySelector('.tg-nav-item[data-active="1"]');
+    let visible = !!item && item.getClientRects().length > 0;
+    if (visible) {
+      const grp = item.closest(".tg-nav-group-items");
+      if (grp) {
+        if (grp.classList.contains("tg-nav-group-closed")) visible = false;
+        else if (axis === "y" && item.offsetTop + item.offsetHeight > grp.offsetTop + grp.clientHeight + 1) visible = false; // still unfolding
+      }
+    }
+    if (!visible) {
+      stopFlight();
+      if (s.shown) setShown(false, s.first);
+      s.path = null;
+      return;
+    }
+    const box = windBoxOf(item, nav);
+    const path = item.getAttribute("data-path");
+    if (s.axis !== axis) { s.axis = axis; stopFlight(); }
+    el.setAttribute("data-axis", axis);
+    if (!s.shown || s.path === null) {
+      stopFlight();
+      apply(box);
+      setShown(true, s.first);
+    } else if (s.path !== path) {
+      const from = s.flying ? windBoxOf(el, nav) : s.box;
+      stopFlight();
+      fly(from, box, item);
+    } else if (!s.flying && !windSame(box, s.box)) {
+      apply(box);
+    }
+    s.first = false;
+    s.path = path;
+    s.box = box;
+  };
+  syncRef.current = sync;
+
+  // after every render of the sidebar (route, language, collapse, group toggle, role…)
+  React.useLayoutEffect(() => { sync(); });
+
+  shE(() => {
+    const nav = navRef.current;
+    if (!nav) return;
+    let raf = 0;
+    const later = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => syncRef.current()); };
+    const observed = new Set();
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(later) : null;
+    const observeAll = () => {
+      if (!ro) return;
+      [nav, ...nav.querySelectorAll(".tg-nav-group, .tg-nav-group-items, .tg-nav-item")].forEach(n => {
+        if (!observed.has(n)) { observed.add(n); ro.observe(n); }
+      });
+    };
+    observeAll();
+    const mo = new MutationObserver(() => { observeAll(); later(); });
+    mo.observe(nav, { childList: true, subtree: true });
+    const rootMo = new MutationObserver(later);
+    rootMo.observe(document.documentElement, { attributes: true, attributeFilter: ["data-layout", "data-density", "dir", "lang"] });
+    nav.addEventListener("scroll", later, { passive: true });
+    nav.addEventListener("transitionend", later);
+    window.addEventListener("resize", later);
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(later);
+    return () => {
+      cancelAnimationFrame(raf);
+      ro && ro.disconnect();
+      mo.disconnect();
+      rootMo.disconnect();
+      nav.removeEventListener("scroll", later);
+      nav.removeEventListener("transitionend", later);
+      window.removeEventListener("resize", later);
+      stopFlight();
+    };
+  }, []);
+}
+
+function WindIndicator({ windRef }) {
+  return (
+    <div className="tg-wind" ref={windRef} aria-hidden="true" data-shown="0" data-axis="y">
+      <div className="tg-wind-body">
+        <span className="tg-wind-tint" />
+        <span className="tg-wind-gust" />
+        <span className="tg-wind-streak" />
+        <span className="tg-wind-streak" />
+        <span className="tg-wind-streak" />
+        <span className="tg-wind-streak" />
+        <span className="tg-wind-puff" />
+      </div>
+      <span className="tg-wind-bar" />
+    </div>
+  );
+}
+
 // ---------- Sidebar ----------
 function Sidebar({ route, nav, mobileOpen, setMobileOpen }) {
   const { t, sidebarCollapsed, role, data } = useApp();
   const collapsed = sidebarCollapsed && !mobileOpen;
   const [closedGroups, setClosedGroups] = shS({});
   const toggleGroup = (key) => setClosedGroups(g => ({ ...g, [key]: !g[key] }));
+  const navRef = shR(null);
+  const windRef = shR(null);
+  useWindIndicator(navRef, windRef);
   return (
     <>
       {mobileOpen && <div className="tg-sidebar-backdrop" onClick={() => setMobileOpen(false)} />}
@@ -118,7 +368,8 @@ function Sidebar({ route, nav, mobileOpen, setMobileOpen }) {
         <div className="tg-sidebar-head">
           <Logo compact={collapsed} />
         </div>
-        <nav className="tg-sidebar-nav">
+        <nav className="tg-sidebar-nav" ref={navRef}>
+          <WindIndicator windRef={windRef} />
           {NAV.map(grp => {
             const items = grp.items.filter(it => canAccess(role, it.path, data));
             if (!items.length) return null;
@@ -136,7 +387,7 @@ function Sidebar({ route, nav, mobileOpen, setMobileOpen }) {
                     const Ico = I[it.icon];
                     const active = route === it.path || route.startsWith(it.path + "/");
                     return (
-                      <button key={it.path} className="tg-nav-item" data-active={active ? "1" : undefined}
+                      <button key={it.path} className="tg-nav-item" data-path={it.path} data-active={active ? "1" : undefined}
                         title={collapsed ? t(it.key) : undefined}
                         onClick={() => { nav(it.path); setMobileOpen(false); }}>
                         <Ico size={18} />
