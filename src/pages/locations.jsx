@@ -222,7 +222,7 @@ function LocationsPage() {
           <Card pad={false}>
             {loading ? <SkeletonRows rows={8} cols={3} /> : filteredDistricts.length === 0
               ? <EmptyState icon={<I.mapPin size={26} />} title={lx("emptyDistricts")} />
-              : <DataTable columns={districtColumns} rows={filteredDistricts} onRowClick={openEditDistrict} defaultSort={{ key: "name", dir: "asc" }} />}
+              : <DataTable columns={districtColumns} rows={filteredDistricts} onRowClick={openEditDistrict} defaultSort={{ key: "name", dir: "asc" }} rowTone={r => neighborhoodCountFor(r.id) > 0 ? "blue" : "amber"} />}
           </Card>
         </>
       )}
@@ -238,31 +238,34 @@ function LocationsPage() {
           <Card pad={false}>
             {loading ? <SkeletonRows rows={8} cols={3} /> : filteredNeighborhoods.length === 0
               ? <EmptyState icon={<I.home size={26} />} title={lx("emptyNeighborhoods")} />
-              : <DataTable columns={neighborhoodColumns} rows={filteredNeighborhoods} onRowClick={openEditNeighborhood} defaultSort={{ key: "district", dir: "asc" }} />}
+              : <DataTable columns={neighborhoodColumns} rows={filteredNeighborhoods} onRowClick={openEditNeighborhood} defaultSort={{ key: "district", dir: "asc" }} rowTone={r => window.accentColorFromText ? window.accentColorFromText(districtNameFor(r.district) || "") : "violet"} />}
           </Card>
         </>
       )}
 
       {/* District modal */}
       <Modal open={districtModal} onClose={() => { setDistrictModal(false); setEditDistrict(null); }}
-        title={editDistrict ? lx("editDistrict") : lx("newDistrict")} icon={<I.mapPin size={18} />} width={420}
+        title={editDistrict ? lx("editDistrict") : lx("newDistrict")} subtitle={editDistrict?.name || undefined} icon={<I.mapPin size={18} />} tone="blue" width={440}
         footer={<>
           <Button variant="ghost" onClick={() => { setDistrictModal(false); setEditDistrict(null); }}>{lx("cancel")}</Button>
           <Button variant="primary" onClick={saveDistrict}>{lx("save")}</Button>
         </>}>
-        <Field label={lx("districtName")} required>
-          <Input value={districtForm.name} onChange={e => setDistrictForm(f => ({ ...f, name: e.target.value }))} autoFocus />
-        </Field>
+        <ModalSection title={secTx("main")} icon={<I.mapPin size={15} />} tone="blue">
+          <Field label={lx("districtName")} required>
+            <Input value={districtForm.name} onChange={e => setDistrictForm(f => ({ ...f, name: e.target.value }))} autoFocus />
+          </Field>
+          {editDistrict && <InfoRow tone="blue" label={lx("neighborhoodsCount")} value={`${neighborhoodCountFor(editDistrict.id)} ta`} />}
+        </ModalSection>
       </Modal>
 
       {/* Neighborhood modal */}
       <Modal open={neighborhoodModal} onClose={() => { setNeighborhoodModal(false); setEditNeighborhood(null); }}
-        title={editNeighborhood ? lx("editNeighborhood") : lx("newNeighborhood")} icon={<I.home size={18} />} width={420}
+        title={editNeighborhood ? lx("editNeighborhood") : lx("newNeighborhood")} subtitle={editNeighborhood ? [editNeighborhood.name, districtNameFor(editNeighborhood.district)].filter(Boolean).join(" · ") : undefined} icon={<I.home size={18} />} tone="violet" width={440}
         footer={<>
           <Button variant="ghost" onClick={() => { setNeighborhoodModal(false); setEditNeighborhood(null); }}>{lx("cancel")}</Button>
           <Button variant="primary" onClick={saveNeighborhood}>{lx("save")}</Button>
         </>}>
-        <div style={{ display: "grid", gap: 14 }}>
+        <ModalSection title={secTx("main")} icon={<I.home size={15} />} tone="violet">
           <Field label={lx("district")} required>
             <Select value={neighborhoodForm.districtId} onChange={v => setNeighborhoodForm(f => ({ ...f, districtId: v }))}
               options={districts.map(d => ({ value: d.id, label: d.name }))} />
@@ -270,7 +273,7 @@ function LocationsPage() {
           <Field label={lx("neighborhoodName")} required>
             <Input value={neighborhoodForm.name} onChange={e => setNeighborhoodForm(f => ({ ...f, name: e.target.value }))} autoFocus />
           </Field>
-        </div>
+        </ModalSection>
       </Modal>
 
       {/* Delete district */}

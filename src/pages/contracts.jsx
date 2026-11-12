@@ -211,20 +211,10 @@ function ContractTypeBadge({ type }) {
   return <Badge color={color}>{label}</Badge>;
 }
 
-function FormSection({ label, children }) {
-  return (
-    <div style={{ display: "grid", gap: 12 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <div style={{ height: 1, flex: 1, background: "var(--border)" }} />
-        <span style={{
-          fontSize: 11, fontWeight: 700, letterSpacing: ".12em",
-          textTransform: "uppercase", color: "var(--text-3)", whiteSpace: "nowrap",
-        }}>{label}</span>
-        <div style={{ height: 1, flex: 1, background: "var(--border)" }} />
-      </div>
-      {children}
-    </div>
-  );
+const contractTone = (type) => type === "retail_sale" ? "blue" : "violet";
+
+function FormSection({ label, children, tone = "accent", icon }) {
+  return <ModalSection title={label} tone={tone} icon={icon}>{children}</ModalSection>;
 }
 
 function todayIso() {
@@ -307,7 +297,7 @@ function RetailSaleForm({ form, set, setProduct }) {
 
   return (
     <div style={{ display: "grid", gap: 20 }}>
-      <FormSection label={cnTx("sectionCommon")}>
+      <FormSection label={cnTx("sectionCommon")} tone="accent" icon={<I.doc size={15} />}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
           <Field label={cnTx("contractNumber")} required><Input value={form.contract_number} onChange={e => set("contract_number", e.target.value)} placeholder="77" /></Field>
           <Field label={cnTx("contractDate")} required><DatePickerInput value={form.contract_date} onChange={v => set("contract_date", v)} /></Field>
@@ -319,7 +309,7 @@ function RetailSaleForm({ form, set, setProduct }) {
         </div>
       </FormSection>
 
-      <FormSection label={cnTx("sectionSeller")}>
+      <FormSection label={cnTx("sectionSeller")} tone="blue" icon={<I.store size={15} />}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <Field label={cnTx("sellerOrgName")} required><Input value={form.seller_organization_name} onChange={e => set("seller_organization_name", e.target.value)} /></Field>
           <Field label={cnTx("sellerDirectorName")} required><Input value={form.seller_director_full_name} onChange={e => set("seller_director_full_name", e.target.value)} /></Field>
@@ -334,7 +324,7 @@ function RetailSaleForm({ form, set, setProduct }) {
         </div>
       </FormSection>
 
-      <FormSection label={cnTx("sectionBuyer")}>
+      <FormSection label={cnTx("sectionBuyer")} tone="violet" icon={<I.user size={15} />}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <Field label={cnTx("buyerFullName")} required><Input value={form.buyer_full_name} onChange={e => set("buyer_full_name", e.target.value)} /></Field>
           <Field label={cnTx("buyerAddress")} required><Input value={form.buyer_address} onChange={e => set("buyer_address", e.target.value)} /></Field>
@@ -345,7 +335,7 @@ function RetailSaleForm({ form, set, setProduct }) {
         </div>
       </FormSection>
 
-      <FormSection label={cnTx("sectionProducts")}>
+      <FormSection label={cnTx("sectionProducts")} tone="cyan" icon={<I.box size={15} />}>
         <div style={{ display: "grid", gap: 8 }}>
           <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr auto", gap: 8, padding: "6px 8px", background: "var(--surface-2)", borderRadius: 8 }}>
             <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: ".08em" }}>{cnTx("productName")}</span>
@@ -379,7 +369,7 @@ function RetailSaleForm({ form, set, setProduct }) {
         </div>
       </FormSection>
 
-      <FormSection label={cnTx("sectionPayment")}>
+      <FormSection label={cnTx("sectionPayment")} tone="green" icon={<I.wallet size={15} />}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12 }}>
           <Field label={cnTx("totalAmount")} required><Input value={form.total_amount} onChange={e => set("total_amount", e.target.value)} placeholder="40000000" /></Field>
           <Field label={cnTx("paymentMethod")} required><Input value={form.payment_method} onChange={e => set("payment_method", e.target.value)} placeholder="Naqd" /></Field>
@@ -388,7 +378,7 @@ function RetailSaleForm({ form, set, setProduct }) {
         </div>
       </FormSection>
 
-      <FormSection label={cnTx("sectionTerms")}>
+      <FormSection label={cnTx("sectionTerms")} tone="amber" icon={<I.shield size={15} />}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12 }}>
           <Field label={cnTx("deliveryDays")}><Input value={form.delivery_days} onChange={e => set("delivery_days", e.target.value)} placeholder="15 kun" /></Field>
           <Field label={cnTx("exchangeDays")}><Input value={form.exchange_days} onChange={e => set("exchange_days", e.target.value)} placeholder="5" /></Field>
@@ -408,7 +398,7 @@ function RetailSaleForm({ form, set, setProduct }) {
 function GuaranteeForm({ form, set }) {
   return (
     <div style={{ display: "grid", gap: 20 }}>
-      <FormSection label={cnTx("sectionCommon")}>
+      <FormSection label={cnTx("sectionCommon")} tone="accent" icon={<I.doc size={15} />}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
           <Field label={cnTx("contractNumber")} required><Input value={form.contract_number} onChange={e => set("contract_number", e.target.value)} placeholder="78" /></Field>
           <Field label={cnTx("contractDate")} required><DatePickerInput value={form.contract_date} onChange={v => set("contract_date", v)} /></Field>
@@ -420,7 +410,7 @@ function GuaranteeForm({ form, set }) {
         </div>
       </FormSection>
 
-      <FormSection label={cnTx("sectionCreditor")}>
+      <FormSection label={cnTx("sectionCreditor")} tone="blue" icon={<I.building size={15} />}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <Field label={cnTx("creditorFullName")} required><Input value={form.creditor_full_name} onChange={e => set("creditor_full_name", e.target.value)} /></Field>
           <Field label={cnTx("creditorRepresentative")}><Input value={form.creditor_representative} onChange={e => set("creditor_representative", e.target.value)} /></Field>
@@ -429,14 +419,14 @@ function GuaranteeForm({ form, set }) {
         </div>
       </FormSection>
 
-      <FormSection label={cnTx("sectionGuarantor")}>
+      <FormSection label={cnTx("sectionGuarantor")} tone="violet" icon={<I.shield size={15} />}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <Field label={cnTx("guarantorFullName")} required><Input value={form.guarantor_full_name} onChange={e => set("guarantor_full_name", e.target.value)} /></Field>
           <Field label={cnTx("guarantorAddress")}><Input value={form.guarantor_address} onChange={e => set("guarantor_address", e.target.value)} /></Field>
         </div>
       </FormSection>
 
-      <FormSection label={cnTx("sectionDebtor")}>
+      <FormSection label={cnTx("sectionDebtor")} tone="amber" icon={<I.user size={15} />}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <Field label={cnTx("debtorFullName")} required><Input value={form.debtor_full_name} onChange={e => set("debtor_full_name", e.target.value)} /></Field>
           <Field label={cnTx("debtorAddress")}><Input value={form.debtor_address} onChange={e => set("debtor_address", e.target.value)} /></Field>
@@ -445,7 +435,7 @@ function GuaranteeForm({ form, set }) {
         </div>
       </FormSection>
 
-      <FormSection label={cnTx("sectionCredit")}>
+      <FormSection label={cnTx("sectionCredit")} tone="green" icon={<I.wallet size={15} />}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <Field label={cnTx("creditContractNum")} required><Input value={form.credit_contract_number} onChange={e => set("credit_contract_number", e.target.value)} /></Field>
           <Field label={cnTx("creditPurpose")} required><Input value={form.credit_purpose} onChange={e => set("credit_purpose", e.target.value)} /></Field>
@@ -663,7 +653,9 @@ function ContractGenerateModal({ open, onClose, onGenerated }) {
       open={open}
       onClose={onClose}
       title={cnTx("generateTitle")}
-      icon={<I.doc size={18} />}
+      subtitle={generated ? cnTx("successTitle") : step > 0 && contractType ? (contractType === "retail_sale" ? cnTx("typeRetailSale") : cnTx("typeGuarantee")) : cnTx("stepPickType")}
+      tone={generated ? "green" : contractType ? contractTone(contractType) : "accent"}
+      icon={generated ? <I.checkCircle size={18} /> : <I.doc size={18} />}
       width={720}
       footer={footer}
     >
@@ -681,7 +673,7 @@ function ContractGenerateModal({ open, onClose, onGenerated }) {
             <div style={{ fontSize: 20, fontWeight: 780, letterSpacing: "-.02em", marginBottom: 6 }}>{cnTx("successTitle")}</div>
             <div style={{ color: "var(--text-2)", fontSize: 14 }}>{cnTx("successDesc")}</div>
           </div>
-          <div style={{ background: "var(--surface-2)", borderRadius: 14, padding: "14px 18px", display: "grid", gap: 8 }}>
+          <InfoGrid>
             {[
               [cnTx("contractNumber"), generated.contract_number],
               [cnTx("contractTitle"), generated.title || "—"],
@@ -690,13 +682,10 @@ function ContractGenerateModal({ open, onClose, onGenerated }) {
               ...(generated.contract_type === "retail_sale" && generated.payload?.penalty_amount
                 ? [[cnTx("penaltyAmount"), `${fmtNum(generated.payload.penalty_amount)} ${cnTx("som")}`]]
                 : []),
-            ].map(([label, val]) => (
-              <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-                <span style={{ fontSize: 13, color: "var(--text-3)" }}>{label}</span>
-                <span style={{ fontSize: 13, fontWeight: 600 }}>{val}</span>
-              </div>
+            ].map(([label, val], i) => (
+              <InfoRow key={label} tone={i === 0 ? "green" : undefined} label={label} value={val} />
             ))}
-          </div>
+          </InfoGrid>
           <div>
             <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: ".1em", marginBottom: 10 }}>
               {cnTx("downloadFormat")}
@@ -746,7 +735,7 @@ function ContractGenerateModal({ open, onClose, onGenerated }) {
           <div style={{ fontSize: 13, color: "var(--text-2)", marginBottom: 4 }}>
             {cnTx("stepPickType")}
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+          <div className="tg-fgrid" style={{ "--fgrid-min": "240px" }}>
             {typeCards.map(tc => {
               const active = contractType === tc.key;
               return (
@@ -754,7 +743,9 @@ function ContractGenerateModal({ open, onClose, onGenerated }) {
                   key={tc.key}
                   type="button"
                   onClick={() => setContractType(tc.key)}
+                  {...sideLine(tc.color, { active, lift: true })}
                   style={{
+                    "--sl": `var(--${tc.color})`,
                     border: active ? `2px solid var(--${tc.color})` : "2px solid var(--border)",
                     background: active ? `var(--${tc.color}-bg)` : "var(--surface-2)",
                     borderRadius: 16,
@@ -763,6 +754,8 @@ function ContractGenerateModal({ open, onClose, onGenerated }) {
                     textAlign: "left",
                     transition: "all .15s",
                     position: "relative",
+                    color: "inherit",
+                    font: "inherit",
                   }}
                 >
                   <div style={{ display: "flex", alignItems: "flex-start", gap: 14 }}>
@@ -856,38 +849,22 @@ function ContractDownloadModal({ open, onClose, contract }) {
       open={open}
       onClose={onClose}
       title={cnTx("downloadTitle")}
+      subtitle={`#${contract.contract_number || "—"}${contract.title ? " · " + contract.title : ""}`}
+      badge={<ContractTypeBadge type={contract.contract_type} />}
+      tone={contractTone(contract.contract_type)}
       icon={<I.download size={18} />}
-      width={420}
+      width={460}
       footer={<Button variant="ghost" onClick={onClose}>{cnTx("cancel")}</Button>}
     >
       <div style={{ display: "grid", gap: 16 }}>
-        <div style={{ background: "var(--surface-2)", borderRadius: 12, padding: "12px 16px", display: "grid", gap: 6 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 13, color: "var(--text-3)" }}>{cnTx("contractNumber")}</span>
-            <span style={{ fontWeight: 700, fontSize: 13 }}>#{contract.contract_number || "—"}</span>
-          </div>
-          {contract.title && (
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-              <span style={{ fontSize: 13, color: "var(--text-3)" }}>{cnTx("contractTitle")}</span>
-              <span style={{ fontSize: 13, fontWeight: 600 }}>{contract.title}</span>
-            </div>
-          )}
-          {contract.primary_party_name && (
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-              <span style={{ fontSize: 13, color: "var(--text-3)" }}>{cnTx("primaryPartyName")}</span>
-              <span style={{ fontSize: 13 }}>{contract.primary_party_name}</span>
-            </div>
-          )}
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 13, color: "var(--text-3)" }}>Tur</span>
-            <ContractTypeBadge type={contract.contract_type} />
-          </div>
-        </div>
+        <InfoGrid>
+          <InfoRow tone={contractTone(contract.contract_type)} label={cnTx("contractNumber")} value={`#${contract.contract_number || "—"}`} />
+          <InfoRow label="Tur" value={contract.contract_type === "retail_sale" ? cnTx("typeRetailSale") : cnTx("typeGuarantee")} />
+          {contract.title && <InfoRow full label={cnTx("contractTitle")} value={contract.title} />}
+          {contract.primary_party_name && <InfoRow full label={cnTx("primaryPartyName")} value={contract.primary_party_name} />}
+        </InfoGrid>
 
-        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: ".1em" }}>
-          {cnTx("downloadFormat")}
-        </div>
-
+        <ModalSection title={cnTx("downloadFormat")} icon={<I.download size={15} />} tone={contractTone(contract.contract_type)}>
         <div style={{ display: "grid", gap: 10 }}>
           {formats.map(fmt => {
             const avail = !!fmt.url;
@@ -931,6 +908,7 @@ function ContractDownloadModal({ open, onClose, contract }) {
             );
           })}
         </div>
+        </ModalSection>
       </div>
     </Modal>
   );
@@ -941,36 +919,24 @@ function ContractRow({ contract }) {
 
   return (
     <>
-      <div style={{
-        display: "grid",
-        gridTemplateColumns: "90px 1fr 1fr auto 120px 44px",
-        gap: 12,
-        padding: "14px 16px",
-        alignItems: "center",
-        borderBottom: "1px solid var(--border)",
-        background: "transparent",
-        transition: "background .12s",
-      }}
-        onMouseEnter={e => e.currentTarget.style.background = "var(--surface-2)"}
-        onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-      >
-        <div style={{ fontWeight: 700, fontSize: 14, color: "var(--text)", fontVariantNumeric: "tabular-nums" }}>
+      <div {...sideLine(contractTone(contract.contract_type), { className: "cn-grid cn-row side-line-sm" })}>
+        <div className="cn-row-num" style={{ fontWeight: 700, fontSize: 14, color: "var(--text)", fontVariantNumeric: "tabular-nums" }}>
           #{contract.contract_number || "—"}
         </div>
-        <div>
+        <div className="cn-row-title" style={{ minWidth: 0 }}>
           <div style={{ fontWeight: 600, fontSize: 13 }}>{contract.title || "—"}</div>
           {contract.primary_party_name && (
             <div style={{ fontSize: 12, color: "var(--text-3)", marginTop: 2 }}>{contract.primary_party_name}</div>
           )}
         </div>
-        <div style={{ fontSize: 12, color: "var(--text-2)" }}>
+        <div className="cn-row-author" style={{ fontSize: 12, color: "var(--text-2)" }}>
           {contract.created_by_username || "—"}
         </div>
         <ContractTypeBadge type={contract.contract_type} />
-        <div style={{ fontSize: 12, color: "var(--text-3)", textAlign: "right" }}>
+        <div className="cn-row-date" style={{ fontSize: 12, color: "var(--text-3)", textAlign: "right" }}>
           {fmtContractDate(contract.created_at)}
         </div>
-        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <div className="cn-row-action" style={{ display: "flex", justifyContent: "flex-end" }}>
           <IconButton
             icon={<I.download size={15} />}
             label={cnTx("download")}
@@ -1081,13 +1047,7 @@ function ContractsPage() {
             </div>
           ) : (
             <div>
-              <div style={{
-                display: "grid",
-                gridTemplateColumns: "90px 1fr 1fr auto 120px 44px",
-                gap: 12,
-                padding: "10px 16px",
-                borderBottom: "1px solid var(--border)",
-              }}>
+              <div className="cn-grid cn-head">
                 {["#", cnTx("contractTitle"), "Yaratuvchi", "Tur", "Sana", ""].map((h, i) => (
                   <span key={i} style={{ fontSize: 11, fontWeight: 700, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: ".08em" }}>{h}</span>
                 ))}

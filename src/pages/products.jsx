@@ -262,13 +262,17 @@ function productDateLabel(value) {
   return fmtDate(value, true);
 }
 
+// Side-line tone for a product = stock state (same colours as the stock badge)
+const productStockTone = (product) => Number(product?.stockQuantity) === 0 ? "red" : Number(product?.stockQuantity) < 5 ? "amber" : "green";
+const productCategoryTone = (category) => window.accentColorFromText ? window.accentColorFromText(category?.name || "") : "accent";
+
 function ProductCard({ product, onClick }) {
   const name = window.productDisplayName ? window.productDisplayName(product) : (product.name || product.model || ptx("product"));
   const category = window.productDisplayCategory ? window.productDisplayCategory(product) : (product.category || ptx("uncategorized"));
   const stockColor = product.stockQuantity === 0 ? "red" : product.stockQuantity < 5 ? "amber" : "green";
 
   return (
-    <Card hover pad={false} onClick={onClick}>
+    <Card hover pad={false} onClick={onClick} {...sideLine(productStockTone(product), { className: "side-line-full", style: { overflow: "hidden" } })}>
       <div style={{ position: "relative" }}>
         <ProductPhoto product={product} size="card" />
         <span style={{ position: "absolute", top: 10, left: 10 }}>
@@ -492,10 +496,10 @@ function ProductsPage() {
 
       {loading ? <SkeletonRows rows={10} cols={5} /> : section === "products" ? (
         view === "table"
-          ? <Card pad={false}><DataTable columns={columns} rows={filtered} onRowClick={(row) => setViewProduct(row)} pageSize={12} defaultSort={{ key: "updatedAt", dir: "desc" }} /></Card>
+          ? <Card pad={false}><DataTable columns={columns} rows={filtered} onRowClick={(row) => setViewProduct(row)} pageSize={12} defaultSort={{ key: "updatedAt", dir: "desc" }} rowTone={productStockTone} /></Card>
           : <div className="grid-3">{filtered.map((product) => <ProductCard key={product.id} product={product} onClick={() => setViewProduct(product)} />)}</div>
       ) : (
-        <Card pad={false}><DataTable columns={categoryColumns} rows={filteredCategories} onRowClick={(row) => setEditCategory(row)} pageSize={12} defaultSort={{ key: "sortOrder", dir: "asc" }} /></Card>
+        <Card pad={false}><DataTable columns={categoryColumns} rows={filteredCategories} onRowClick={(row) => setEditCategory(row)} pageSize={12} defaultSort={{ key: "sortOrder", dir: "asc" }} rowTone={productCategoryTone} /></Card>
       )}
 
       <ProductFormModal
@@ -572,8 +576,9 @@ function ProductsPage() {
 }
 window.ProductsPage = ProductsPage;
 
-function ProductViewModal({ open, onClose, onEdit, onDelete, product }) {
+function ProductViewModal({ open, onClose, onEdit, onDelete, product: productProp }) {
   const [previewImage, setPreviewImage] = prS(null);
+  const product = useLastValue(productProp);
   if (!product) return null;
   const name = window.productDisplayName ? window.productDisplayName(product) : (product.name || product.model || ptx("product"));
   const category = window.productDisplayCategory ? window.productDisplayCategory(product) : (product.category || ptx("uncategorized"));
@@ -583,7 +588,10 @@ function ProductViewModal({ open, onClose, onEdit, onDelete, product }) {
       <Modal
         open={open}
         onClose={onClose}
-        title={ptx("productDetails")}
+        title={name}
+        subtitle={[ptx("productDetails"), category].join(" · ")}
+        badge={<Badge color={productStockTone(product)} size="sm">{product.stockQuantity} {ptx("quantityUnit")}</Badge>}
+        tone={productStockTone(product)}
         icon={<I.box size={18} />}
         width={760}
         footer={<>
@@ -592,28 +600,31 @@ function ProductViewModal({ open, onClose, onEdit, onDelete, product }) {
           <Button variant="primary" onClick={onClose}>{ptx("close")}</Button>
         </>}
       >
-        <div style={{ display: "grid", gridTemplateColumns: "240px 1fr", gap: 18 }}>
+        <div className="tg-split-media">
           <ProductPhoto product={product} size="view" fit="contain" onClick={() => images[0] && setPreviewImage(images[0])} />
-          <div className="tg-meta">
-            <div className="tg-meta-row"><span className="tg-meta-k">{ptx("productName")}</span><span className="tg-meta-v">{name}</span></div>
-            <div className="tg-meta-row"><span className="tg-meta-k">{ptx("category")}</span><span className="tg-meta-v">{category}</span></div>
-            <div className="tg-meta-row"><span className="tg-meta-k">{ptx("price")}</span><span className="tg-meta-v">{fmtUZS(product.priceUzs)}</span></div>
-            <div className="tg-meta-row"><span className="tg-meta-k">{ptx("stock")}</span><span className="tg-meta-v">{product.stockQuantity} {ptx("quantityUnit")}</span></div>
-            <div className="tg-meta-row"><span className="tg-meta-k">{ptx("created")}</span><span className="tg-meta-v">{productDateLabel(product.createdAt)}</span></div>
-            <div className="tg-meta-row"><span className="tg-meta-k">{ptx("updated")}</span><span className="tg-meta-v">{productDateLabel(product.updatedAt)}</span></div>
-          </div>
+          <ModalSection title={secTx("details")} icon={<I.box size={15} />} tone={productStockTone(product)}>
+            <InfoGrid>
+              <InfoRow full label={ptx("productName")} value={name} />
+              <InfoRow label={ptx("category")} value={category} />
+              <InfoRow tone="green" label={ptx("price")} value={fmtUZS(product.priceUzs)} />
+              <InfoRow tone={productStockTone(product)} label={ptx("stock")} value={`${product.stockQuantity} ${ptx("quantityUnit")}`} />
+              <InfoRow label={ptx("created")} value={productDateLabel(product.createdAt)} />
+              <InfoRow label={ptx("updated")} value={productDateLabel(product.updatedAt)} />
+            </InfoGrid>
+          </ModalSection>
         </div>
         {images.length > 1 && (
-          <div className="product-preview-grid">
-            {images.map((image) => (
-              <ProductPhoto key={image.id} product={product} image={image} size="thumb" fit="cover" onClick={() => setPreviewImage(image)} />
-            ))}
-          </div>
+          <ModalSection title={secTx("media")} icon={<I.image size={15} />} tone="cyan" className="tg-msec-spaced">
+            <div className="product-preview-grid">
+              {images.map((image) => (
+                <ProductPhoto key={image.id} product={product} image={image} size="thumb" fit="cover" onClick={() => setPreviewImage(image)} />
+              ))}
+            </div>
+          </ModalSection>
         )}
-        <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid var(--border-soft)" }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 8 }}>{ptx("description")}</div>
-          <div style={{ fontSize: 13.5, color: "var(--text-2)", lineHeight: 1.65, whiteSpace: "pre-wrap" }}>{product.description || ptx("noDescription")}</div>
-        </div>
+        <ModalSection title={ptx("description")} icon={<I.note size={15} />} tone="neutral" className="tg-msec-spaced">
+          <div className="tg-note-box" style={{ whiteSpace: "pre-wrap" }}>{product.description || ptx("noDescription")}</div>
+        </ModalSection>
       </Modal>
       <ProductImageModal open={!!previewImage} onClose={() => setPreviewImage(null)} product={product} image={previewImage} />
     </>
@@ -677,8 +688,10 @@ function ProductFormModal({ open, onClose, onSave, initial, onManageCategories }
       open={open}
       onClose={onClose}
       title={initial ? ptx("editProduct") : ptx("newProduct")}
+      subtitle={initial ? (initial.name || initial.model || undefined) : undefined}
+      tone={initial ? productStockTone({ stockQuantity: apiParseNumber(form.stockQuantity || 0) }) : "accent"}
       icon={initial ? <I.edit size={18} /> : <I.plus size={18} />}
-      width={580}
+      width={620}
       footer={<>
         <Button variant="ghost" onClick={onClose}>{window.TRANSLATIONS?.[productLang()]?.["common.cancel"] || "Bekor qilish"}</Button>
         <Button
@@ -713,7 +726,7 @@ function ProductFormModal({ open, onClose, onSave, initial, onManageCategories }
         </Button>
       </>}
     >
-      <div style={{ display: "grid", gap: 14 }}>
+      <ModalSection title={secTx("main")} icon={<I.box size={15} />} tone="accent">
         <Field label={ptx("productName")} required><Input value={form.name} onChange={(event) => set("name", event.target.value)} /></Field>
         <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 10, alignItems: "end" }}>
           <Field label={ptx("category")}>
@@ -726,13 +739,16 @@ function ProductFormModal({ open, onClose, onSave, initial, onManageCategories }
           </Field>
           <Button variant="default" size="sm" icon={<I.layers size={15} />} onClick={onManageCategories}>{ptx("manage")}</Button>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+      </ModalSection>
+      <ModalSection title={secTx("pricing")} icon={<I.wallet size={15} />} tone="green">
+        <div className="tg-fgrid">
           <Field label={ptx("price")}><Input type="number" value={form.priceUzs} onChange={(event) => set("priceUzs", event.target.value)} /></Field>
           <Field label={ptx("stock")}><Input type="number" value={form.stockQuantity} onChange={(event) => set("stockQuantity", event.target.value)} /></Field>
         </div>
-        <Field label={ptx("images")}>
+      </ModalSection>
+      <ModalSection title={ptx("images")} icon={<I.image size={15} />} tone="cyan">
           <div style={{ display: "grid", gap: 10 }}>
-            <Card style={{ padding: 12 }}>
+            <Card {...sideLine("cyan", { style: { padding: 12 } })}>
               <Field label={ptx("imageFiles")}>
                 <input
                   type="file"
@@ -747,7 +763,7 @@ function ProductFormModal({ open, onClose, onSave, initial, onManageCategories }
               )}
             </Card>
             {(form.images || []).map((image, index) => (
-              <Card key={image.id || index} style={{ padding: 12 }}>
+              <Card key={image.id || index} {...sideLine(image.isPrimary ? "amber" : "neutral", { active: image.isPrimary, style: { padding: 12 } })}>
                 <div style={{ display: "grid", gap: 10 }}>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                     <Field label={ptx("imageUrl")}><Input value={image.url || ""} onChange={(event) => setImage(index, { url: event.target.value })} placeholder="https://..." /></Field>
@@ -768,9 +784,10 @@ function ProductFormModal({ open, onClose, onSave, initial, onManageCategories }
             ))}
             <Button variant="default" size="sm" icon={<I.plus size={14} />} onClick={addImage}>{ptx("addAnotherImage")}</Button>
           </div>
-        </Field>
+      </ModalSection>
+      <ModalSection title={ptx("description")} icon={<I.note size={15} />} tone="neutral">
         <Field label={ptx("description")}><Textarea rows={5} value={form.description || ""} onChange={(event) => set("description", event.target.value)} placeholder={ptx("productDescription")} /></Field>
-      </div>
+      </ModalSection>
     </Modal>
   );
 }
@@ -804,6 +821,8 @@ function ProductCategoryFormModal({ open, onClose, initial, onSave, count }) {
       open={open}
       onClose={onClose}
       title={initial ? ptx("editCategoryTitle") : ptx("newCategory")}
+      subtitle={form.name || undefined}
+      tone={form.name ? productCategoryTone(form) : "accent"}
       icon={initial ? <I.edit size={18} /> : <I.plus size={18} />}
       width={460}
       footer={<>
@@ -821,7 +840,7 @@ function ProductCategoryFormModal({ open, onClose, initial, onSave, count }) {
         </Button>
       </>}
     >
-      <div style={{ display: "grid", gap: 14 }}>
+      <ModalSection title={secTx("main")} icon={<I.layers size={15} />} tone={form.name ? productCategoryTone(form) : "accent"}>
         <Field label={ptx("categoryName")} required>
           <Input
             value={form.name}
@@ -844,7 +863,7 @@ function ProductCategoryFormModal({ open, onClose, initial, onSave, count }) {
         <Field label={ptx("sortOrder")}>
           <Input type="number" value={form.sortOrder} onChange={(event) => set("sortOrder", event.target.value)} />
         </Field>
-      </div>
+      </ModalSection>
     </Modal>
   );
 }
@@ -875,6 +894,7 @@ function ProductCategoriesModal({ open, onClose }) {
       open={open}
       onClose={onClose}
       title={ptx("productCategories")}
+      subtitle={`${categories.length} ${ptx("results")}`}
       icon={<I.layers size={18} />}
       width={640}
       footer={<>
@@ -885,7 +905,7 @@ function ProductCategoriesModal({ open, onClose }) {
       {categories.length ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {categories.map((category) => (
-            <Card key={category.id} style={{ padding: 0 }}>
+            <Card key={category.id} {...sideLine(productCategoryTone(category), { lift: true, style: { padding: 0 } })}>
               <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 16px" }}>
                 <span style={{ width: 12, height: 12, borderRadius: 999, background: window.accentColorFromText ? window.accentColorFromText(category.name) : "var(--accent)", flexShrink: 0 }} />
                 <div style={{ flex: 1, minWidth: 0 }}>

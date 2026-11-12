@@ -273,8 +273,7 @@ function LangSelector() {
         <div className="tg-dd-menu pop-in tg-dd-right"
           style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, width: 182, zIndex: 200 }}>
           {LANGS.map(l => (
-            <button key={l.value} className="tg-dd-item"
-              style={{ gap: 10, borderLeft: lang === l.value ? `3px solid ${l.color}` : "3px solid transparent" }}
+            <button key={l.value} {...sideLine(lang === l.value ? l.color : "neutral", { active: lang === l.value, className: "tg-dd-item side-line-sm side-line-quiet", style: { gap: 10 } })}
               onClick={() => { setLang(l.value); setOpen(false); }}>
               <FlagIcon code={l.code} style={{ width: 26 }} />
               <span style={{ flex: 1, color: lang === l.value ? l.color : undefined, fontWeight: lang === l.value ? 600 : undefined }}>{l.label}</span>
@@ -319,8 +318,7 @@ function MobileHeaderMenu({ onCustToggle }) {
           <div className="tg-dd-divider" />
           <div className="tg-mobile-menu-section">{t("common.changeLanguage")}</div>
           {LANGS.map(l => (
-            <button key={l.value} className="tg-dd-item"
-              style={{ gap: 10, borderLeft: lang === l.value ? `3px solid ${l.color}` : "3px solid transparent" }}
+            <button key={l.value} {...sideLine(lang === l.value ? l.color : "neutral", { active: lang === l.value, className: "tg-dd-item side-line-sm side-line-quiet", style: { gap: 10 } })}
               onClick={() => { setLang(l.value); setOpen(false); }}>
               <FlagIcon code={l.code} style={{ width: 22 }} />
               <span style={{ flex: 1, color: lang === l.value ? l.color : undefined, fontWeight: lang === l.value ? 600 : undefined }}>{l.label}</span>
@@ -377,7 +375,7 @@ function NotifPanel({ onClose, nav }) {
           const Ico = I[TYPE_ICON[n.type] || "bell"];
           const color = TYPE_COLOR[n.type] || "slate";
           return (
-            <button key={n.id} className="tg-notif-item" data-unread={!n.read ? "1" : undefined}
+            <button key={n.id} {...sideLine(n.read ? "neutral" : (color === "slate" ? "accent" : color), { className: "tg-notif-item side-line-sm" + (n.read ? " side-line-quiet" : "") })} data-unread={!n.read ? "1" : undefined}
               onClick={() => { markNotificationRead(n.id).catch(() => null); }}>
               <span className="tg-notif-icon" style={{ color: `var(--${color})`, background: `var(--${color}-bg)` }}><Ico size={16} /></span>
               <div style={{ flex: 1, minWidth: 0 }}>

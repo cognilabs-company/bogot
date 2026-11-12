@@ -16,6 +16,9 @@ const whDateTimeForApi = (value) => value ? new Date(value).toISOString() : unde
 const whItemName = (row) => row?.item_name || row?.item?.name || row?.name || "—";
 const whItemUnit = (item) => item?.unit || "dona";
 const whPayTypeColor = (type) => ({ cash: "green", card: "blue", transfer: "violet", debt: "amber", other: "slate" })[type] || "slate";
+// Side-line tones: sale = payment type colour (same as its badge), stock entry = incoming (green)
+const whSaleTone = (sale) => { const c = whPayTypeColor(sale?.payment_type); return c === "slate" ? "neutral" : c; };
+const whRowLine = (tone) => ({ "data-tone": "1", style: { "--sl": toneColor(tone) } });
 const whStatCurrency = (obj, currency) => whNum(obj?.[currency] || 0);
 const PANEL_UNIT = "kilowatt";
 
@@ -147,23 +150,26 @@ function WarehouseItemModal({ open, initial, categories, t, onClose, onSave }) {
 
   if (!open) return null;
   return (
-    <Modal open={open} onClose={onClose} title={initial ? whTx(t, "editItem") : whTx(t, "newItem")} size="md"
+    <Modal open={open} onClose={onClose} title={initial ? whTx(t, "editItem") : whTx(t, "newItem")} subtitle={initial?.name || undefined} width={620}
+      icon={initial ? <I.edit size={18} /> : <I.box size={18} />} tone={form.is_panel ? "amber" : "accent"}
       footer={<><Button variant="ghost" onClick={onClose}>{whTx(t, "cancel")}</Button><Button variant="primary" onClick={handleSave} disabled={saving}>{saving ? `${whTx(t, "save")}...` : whTx(t, "save")}</Button></>}>
-      <div style={{ display: "grid", gap: 14 }}>
-        {error && <div style={{ color: "var(--red)", fontSize: 13, padding: "8px 12px", background: "var(--red-bg)", borderRadius: 6 }}>{error}</div>}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+      {error && <div className="wh-form-alert is-error" style={{ marginBottom: 14 }}><I.alert size={14} /><span>{error}</span></div>}
+      <ModalSection title={secTx("main")} icon={<I.box size={15} />} tone="accent">
+        <div className="tg-fgrid">
           <Field label={whTx(t, "itemName")}><Input value={form.name} onChange={e => set("name", e.target.value)} /></Field>
           <Field label={whTx(t, "category")}><CategoryCombobox value={form.category} onChange={v => set("category", v)} categories={categories || []} placeholder={whTx(t, "category")} /></Field>
         </div>
         <Field label={whTx(t, "description")}><Input value={form.description || ""} onChange={e => set("description", e.target.value)} /></Field>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+      </ModalSection>
+      <ModalSection title={secTx("pricing")} icon={<I.wallet size={15} />} tone="green">
+        <div className="tg-fgrid">
           <Field label={whTx(t, "unit")}><Input value={form.unit} onChange={e => set("unit", e.target.value)} disabled={!!form.is_panel} /></Field>
           <Field label={whTx(t, "currency")}>
             <Select value={form.default_currency} onChange={v => set("default_currency", v)} options={[{ value: "uzs", label: "UZS" }, { value: "usd", label: "USD" }]} />
           </Field>
           <Field label={whTx(t, "lowStock")}><Input type="number" min="0" value={form.low_stock_threshold} onChange={e => set("low_stock_threshold", e.target.value)} /></Field>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div {...sideLine(form.is_panel ? "amber" : "neutral", { active: !!form.is_panel, className: "side-line-sm", style: { display: "flex", alignItems: "center", gap: 10, padding: "10px 12px 10px 15px", borderRadius: 12, background: "var(--surface-2)", border: "1px solid var(--border-soft)" } })}>
           <Toggle checked={!!form.is_panel} onChange={setPanelMode} label={whTx(t, "isPanel")} />
           <span style={{ fontSize: 13, color: "var(--text-2)" }}>{whTx(t, "isPanel")}</span>
         </div>
@@ -173,8 +179,8 @@ function WarehouseItemModal({ open, initial, categories, t, onClose, onSave }) {
           </Field>
         )}
         {form.is_panel && (
-          <div style={{ display: "grid", gap: 12, padding: 12, border: "1px solid var(--border)", borderRadius: 8, background: "var(--surface-2)" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+          <div {...sideLine("amber", { style: { display: "grid", gap: 12, padding: "12px 12px 12px 15px", border: "1px solid var(--border)", borderRadius: 12, background: "var(--surface-2)" } })}>
+            <div className="tg-fgrid">
               <Field label={whTx(t, "panelWatt")}><Input type="number" min="0" value={form.panel_watt} onChange={e => set("panel_watt", e.target.value)} /></Field>
               <Field label={whTx(t, "panelCount")}><Input type="number" min="0" value={form.panel_count} onChange={e => set("panel_count", e.target.value)} /></Field>
               <Field label={whTx(t, "panelPrice")}><Input type="number" min="0" step="0.01" value={form.panel_price} onChange={e => set("panel_price", e.target.value)} /></Field>
@@ -185,7 +191,7 @@ function WarehouseItemModal({ open, initial, categories, t, onClose, onSave }) {
             </div>
           </div>
         )}
-      </div>
+      </ModalSection>
     </Modal>
   );
 }
@@ -337,11 +343,13 @@ function StockEntryModal({ open, initial, items, t, onClose, onSave }) {
   if (!open) return null;
   const saveLabel = isEdit ? whTx(t, "save") : whTx(t, "create");
   return (
-    <Modal open={open} onClose={onClose} title={whTx(t, isEdit ? "editStock" : "stockFormTitle")} icon={isEdit ? <I.edit size={16} /> : <I.download size={16} />}
+    <Modal open={open} onClose={onClose} title={whTx(t, isEdit ? "editStock" : "stockFormTitle")} subtitle={selected ? whItemName({ item: selected }) : undefined} tone="green" width={620} icon={isEdit ? <I.edit size={16} /> : <I.download size={16} />}
       footer={<><Button variant="ghost" onClick={onClose}>{whTx(t, "cancel")}</Button><Button variant="primary" onClick={handleSave} disabled={saving}>{saving ? `${saveLabel}...` : saveLabel}</Button></>}>
-      <div style={{ display: "grid", gap: 14 }}>
+      <div className="tg-modal-alerts">
         {isEdit && <WarehouseEditNotice t={t} />}
         <WarehouseFormError message={error} />
+      </div>
+      <ModalSection title={secTx("stock")} icon={<I.box size={15} />} tone="green">
         <Field label={whTx(t, "item")} hint={fieldErrors.item && <WarehouseFieldError message={fieldErrors.item} />}><Select value={form.item} onChange={v => { set("item", v); const item = items.find(x => x.id === v); if (item) set("currency", item.default_currency || "uzs"); }} options={itemOptions} /></Field>
         <div className="wh-form-grid-3">
           <Field label={whTx(t, "quantity")} hint={fieldErrors.quantity && <WarehouseFieldError message={fieldErrors.quantity} />}><Input className={`tg-input${fieldErrors.quantity ? " is-invalid" : ""}`} type="number" min="0" value={form.quantity} onChange={e => set("quantity", e.target.value)} /></Field>
@@ -350,10 +358,12 @@ function StockEntryModal({ open, initial, items, t, onClose, onSave }) {
         </div>
         {total > 0 && <div className="tg-chips"><span className="tg-chip">{whTx(t, "totalCost")}: {whMoney(total, form.currency)}</span>{selected && <span className="tg-chip">{whTx(t, "unit")}: {whItemUnit(selected)}</span>}</div>}
         {impact && <WarehouseStockImpact t={t} current={impact.current} next={impact.next} unit={whItemUnit(selected)} warning={impact.warning} />}
+      </ModalSection>
+      <ModalSection title={secTx("details")} icon={<I.doc size={15} />} tone="blue">
         <Field label={whTx(t, "supplier")}><Input value={form.supplier_name} onChange={e => set("supplier_name", e.target.value)} /></Field>
         <Field label={whTx(t, "receivedAt")}><DatePickerInput value={form.received_at} onChange={v => set("received_at", v)} mode="datetime" /></Field>
         <Field label={whTx(t, "notes")}><Input value={form.notes} onChange={e => set("notes", e.target.value)} /></Field>
-      </div>
+      </ModalSection>
     </Modal>
   );
 }
@@ -437,11 +447,14 @@ function SaleModal({ open, initial, items, customers, t, onClose, onSave }) {
   if (!open) return null;
   const saveLabel = isEdit ? whTx(t, "save") : whTx(t, "create");
   return (
-    <Modal open={open} onClose={onClose} title={whTx(t, isEdit ? "editSale" : "saleFormTitle")} icon={isEdit ? <I.edit size={16} /> : <I.cart size={16} />}
+    <Modal open={open} onClose={onClose} title={whTx(t, isEdit ? "editSale" : "saleFormTitle")} subtitle={selected ? whItemName({ item: selected }) : undefined}
+      badge={<Badge color={whPayTypeColor(form.payment_type)} size="sm">{whPayTypeLabel(t, form.payment_type)}</Badge>} tone={whSaleTone(form)} width={640} icon={isEdit ? <I.edit size={16} /> : <I.cart size={16} />}
       footer={<><Button variant="ghost" onClick={onClose}>{whTx(t, "cancel")}</Button><Button variant="primary" onClick={handleSave} disabled={saving}>{saving ? `${saveLabel}...` : saveLabel}</Button></>}>
-      <div style={{ display: "grid", gap: 14 }}>
+      <div className="tg-modal-alerts">
         {isEdit && <WarehouseEditNotice t={t} />}
         <WarehouseFormError message={error} />
+      </div>
+      <ModalSection title={secTx("pricing")} icon={<I.cart size={15} />} tone="accent">
         <Field label={whTx(t, "item")} hint={fieldErrors.item && <WarehouseFieldError message={fieldErrors.item} />}><Select value={form.item} onChange={v => { set("item", v); const item = items.find(x => x.id === v); if (item) set("currency", item.default_currency || "uzs"); }} options={itemOptions} /></Field>
         <div className="wh-form-grid-3">
           <Field label={whTx(t, "quantity")} hint={fieldErrors.quantity && <WarehouseFieldError message={fieldErrors.quantity} />}><Input className={`tg-input${fieldErrors.quantity ? " is-invalid" : ""}`} type="number" min="0" value={form.quantity} onChange={e => set("quantity", e.target.value)} /></Field>
@@ -450,10 +463,14 @@ function SaleModal({ open, initial, items, customers, t, onClose, onSave }) {
         </div>
         {total > 0 && <div className="tg-chips"><span className="tg-chip">{whTx(t, "totalAmount")}: {whMoney(total, form.currency)}</span></div>}
         {impact && <WarehouseStockImpact t={t} current={impact.current} next={impact.next} unit={whItemUnit(selected)} />}
+      </ModalSection>
+      <ModalSection title={whTx(t, "paymentType")} icon={<I.wallet size={15} />} tone={whSaleTone(form)}>
         <div className="wh-form-grid-2">
           <Field label={whTx(t, "paidAmount")} hint={fieldErrors.paid_amount && <WarehouseFieldError message={fieldErrors.paid_amount} />}><Input className={`tg-input${fieldErrors.paid_amount ? " is-invalid" : ""}`} type="number" min="0" value={form.paid_amount} onChange={e => set("paid_amount", e.target.value)} /></Field>
           <Field label={whTx(t, "paymentType")}><Select value={form.payment_type} onChange={v => set("payment_type", v)} options={payTypeOptions} /></Field>
         </div>
+      </ModalSection>
+      <ModalSection title={secTx("contact")} icon={<I.user size={15} />} tone="violet">
         {customers && customers.length > 0 && (
           <Field label={whTx(t, "clientLink")}>
             <Select value={form.client} onChange={v => {
@@ -472,7 +489,7 @@ function SaleModal({ open, initial, items, customers, t, onClose, onSave }) {
         </div>
         <Field label={whTx(t, "soldAt")}><DatePickerInput value={form.sold_at} onChange={v => set("sold_at", v)} mode="datetime" /></Field>
         <Field label={whTx(t, "notes")}><Input value={form.notes} onChange={e => set("notes", e.target.value)} /></Field>
-      </div>
+      </ModalSection>
     </Modal>
   );
 }
@@ -735,7 +752,7 @@ function WarehousePage() {
                     const threshold = whNum(item.low_stock_threshold);
                     const low = threshold > 0 && qty <= threshold;
                     return (
-                      <tr key={item.id} style={{ cursor: "pointer", ...(low ? { background: "var(--red-bg)" } : {}) }} onClick={e => { if (!e.target.closest("button")) nav(`/warehouse/${item.id}`); }}>
+                      <tr key={item.id} data-tone="1" style={{ cursor: "pointer", "--sl": toneColor(low ? "red" : qty <= 0 ? "amber" : "green"), ...(low ? { background: "var(--red-bg)" } : {}) }} onClick={e => { if (!e.target.closest("button")) nav(`/warehouse/${item.id}`); }}>
                         <td>
                           <span className="tg-cell-strong">{item.name}</span>
                         </td>
@@ -792,7 +809,7 @@ function WarehousePage() {
                   ) : stockEntries.map((entry) => {
                     const currency = entry.currency || entry.item?.default_currency || "uzs";
                     return (
-                      <tr key={entry.id}>
+                      <tr key={entry.id} {...whRowLine("green")}>
                         <td><span className="tg-cell-strong">{whItemName(entry)}</span></td>
                         <td style={{ textAlign: "right", fontWeight: 700 }}>{fmtNum(whNum(entry.quantity))}</td>
                         <td><Badge color={currency === "usd" ? "teal" : "green"} size="sm">{whCurrencyLabel(currency)}</Badge></td>
@@ -842,9 +859,9 @@ function WarehousePage() {
                   ) : sales.map((sale) => {
                     const currency = sale.currency || sale.item?.default_currency || "uzs";
                     return (
-                      <tr key={sale.id}>
+                      <tr key={sale.id} {...whRowLine(whSaleTone(sale))}>
                         <td><span className="tg-cell-strong">{whItemName(sale)}</span></td>
-                        <td>{sale.client_full_name || sale.client_name || "—"}{sale.client_phone && <span className="tg-cell-sub">{sale.client_phone}</span>}</td>
+                        <td>{sale.client_full_name || sale.client_name || "—"}{sale.client_phone && <span className="tg-cell-sub" style={{ display: "block" }}>{sale.client_phone}</span>}</td>
                         <td style={{ textAlign: "right", fontWeight: 700 }}>{fmtNum(whNum(sale.quantity))}</td>
                         <td><Badge color={currency === "usd" ? "teal" : "green"} size="sm">{whCurrencyLabel(currency)}</Badge></td>
                         <td style={{ textAlign: "right" }}>{whMoney(sale.unit_price, currency)}</td>
@@ -1013,7 +1030,7 @@ function WarehouseItemDetailPage({ id }) {
         </>}
       </div>
 
-      <Card style={{ marginBottom: 16 }}>
+      <Card {...sideLine(low ? "red" : "green", { active: true, style: { marginBottom: 16 } })}>
         <div style={{ display: "grid", gridTemplateColumns: item.is_panel ? "1fr 1fr" : "1fr", gap: 16 }}>
           <div className="tg-meta">
             {item.description && <div className="tg-meta-row"><span className="tg-meta-k">{whTx(t, "description")}</span><span className="tg-meta-v">{item.description}</span></div>}
@@ -1059,11 +1076,11 @@ function WarehouseItemDetailPage({ id }) {
                   ) : salesHistory.map((sale, i) => {
                     const cur = sale.currency || item.default_currency || "uzs";
                     return (
-                      <tr key={sale.id || i}>
+                      <tr key={sale.id || i} {...whRowLine(whSaleTone(sale))}>
                         <td><span className="tg-cell-sub">{fmtDate(sale.sold_at || sale.created_at, true)}</span></td>
                         <td>
                           <span className="tg-cell-strong">{sale.client_full_name || sale.client_name || "—"}</span>
-                          {sale.client_phone && <span className="tg-cell-sub">{sale.client_phone}</span>}
+                          {sale.client_phone && <span className="tg-cell-sub" style={{ display: "block" }}>{sale.client_phone}</span>}
                         </td>
                         <td style={{ textAlign: "right", fontWeight: 700 }}>{fmtNum(whNum(sale.quantity))}</td>
                         <td style={{ textAlign: "right" }}>{whMoney(sale.unit_price, cur)}</td>
@@ -1107,7 +1124,7 @@ function WarehouseItemDetailPage({ id }) {
                   ) : stockHistory.map((entry, i) => {
                     const cur = entry.currency || item.default_currency || "uzs";
                     return (
-                      <tr key={entry.id || i}>
+                      <tr key={entry.id || i} {...whRowLine("green")}>
                         <td><span className="tg-cell-sub">{fmtDate(entry.received_at || entry.created_at, true)}</span></td>
                         <td style={{ textAlign: "right", fontWeight: 700 }}>{fmtNum(whNum(entry.quantity))}</td>
                         <td style={{ textAlign: "right" }}>{entry.unit_cost ? whMoney(entry.unit_cost, cur) : "—"}</td>

@@ -297,7 +297,7 @@ function PipelinePage() {
                       data-pk-id={lead.id}
                       onPointerDown={(event) => handlePointerDown(event, lead, stage, index)}
                       onClick={() => handleCardClick(lead.id)}
-                      style={{ "--idx": index }}
+                      style={{ "--idx": index, "--task-color": cfg.color }}
                     >
                       <PipelineCardBody
                         lead={lead}
@@ -330,7 +330,7 @@ function PipelinePage() {
             transform: `translate3d(${dragState.pointerX - dragState.offsetX}px, ${dragState.pointerY - dragState.offsetY}px, 0)`,
           }}
         >
-          <div className="pk-card pk-card-floating">
+          <div className="pk-card pk-card-floating" style={{ "--task-color": (STAGE_CFG[dragState.overStage || dragLead.pipelineStage] || {}).color }}>
             <PipelineCardBody lead={dragLead} cfg={STAGE_CFG[dragState.overStage || dragLead.pipelineStage]} t={t} interactive={false} />
           </div>
         </div>

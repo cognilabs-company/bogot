@@ -112,6 +112,9 @@ const USER_MODULE_LABELS = {
     chats: "Chat",
     integrations: "Integratsiyalar",
     ai: "AI",
+    contracts: "Shartnomalar",
+    locations: "Hududlar",
+    settings: "Sozlamalar",
     other: "Boshqa",
   },
   ru: {
@@ -128,6 +131,9 @@ const USER_MODULE_LABELS = {
     chats: "Чаты",
     integrations: "Интеграции",
     ai: "AI",
+    contracts: "Договоры",
+    locations: "Регионы",
+    settings: "Настройки",
     other: "Другое",
   },
   en: {
@@ -144,13 +150,16 @@ const USER_MODULE_LABELS = {
     chats: "Chats",
     integrations: "Integrations",
     ai: "AI",
+    contracts: "Contracts",
+    locations: "Locations",
+    settings: "Settings",
     other: "Other",
   },
 };
 
 function userModuleLabel(moduleKey) {
   const lang = currentSystemLang();
-  return USER_MODULE_LABELS[lang]?.[moduleKey] || USER_MODULE_LABELS.uz[moduleKey] || moduleKey;
+  return USER_MODULE_LABELS[lang]?.[moduleKey] || USER_MODULE_LABELS.uz[moduleKey] || String(moduleKey || "").replace(/[_.-]+/g, " ").replace(/^./, (c) => c.toUpperCase());
 }
 
 function roleUiLabel(key) {
@@ -843,7 +852,7 @@ function UsersPage() {
               <thead><tr><th>{sx("user")}</th><th>{sx("role")}</th><th>{sx("permissions")}</th>{hasRegionField && <th>{sx("region")}</th>}<th>{t("common.status")}</th><th>{sx("added")}</th><th></th></tr></thead>
               <tbody>
                 {filtered.map(u => (
-                  <tr key={u.id}>
+                  <tr key={u.id} data-tone="1" style={{ "--sl": toneColor(u.status === "active" ? (USER_ROLE_META[u.role]?.color || "neutral") : "neutral") }}>
                     <td><div style={{ display: "flex", alignItems: "center", gap: 10 }}><Avatar name={u.fullName} hue={u.avatarHue} size={32} /><div><div className="tg-cell-strong">{u.fullName}</div><div className="tg-cell-sub">{u.email}</div></div></div></td>
                     <td><Badge color={USER_ROLE_META[u.role]?.color || "slate"}>{roleUiLabel(u.role)}</Badge></td>
                     <td>
@@ -869,20 +878,21 @@ function UsersPage() {
         )}
       </Panel>
 
-      <Modal open={addOpen} onClose={() => { setAddOpen(false); setEditUser(null); }} title={editUser ? sx("editUser") : sx("newUser")} icon={<I.user size={18} />} width={920}
+      <Modal open={addOpen} onClose={() => { setAddOpen(false); setEditUser(null); }} title={editUser ? sx("editUser") : sx("newUser")} subtitle={editUser?.fullName || undefined}
+        badge={<Badge color={USER_ROLE_META[form.role]?.color || "slate"} size="sm">{roleUiLabel(form.role)}</Badge>} tone={form.status === "inactive" ? "neutral" : (USER_ROLE_META[form.role]?.color || "accent")} icon={editUser ? <I.edit size={18} /> : <I.user size={18} />} width={920}
         footer={<><Button variant="ghost" onClick={() => { setAddOpen(false); setEditUser(null); }}>{t("common.cancel")}</Button><Button variant="primary" onClick={saveUser}>{editUser ? t("common.save") : t("common.add")}</Button></>}>
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(320px, .9fr)", gap: 18 }}>
-          <div style={{ display: "grid", gap: 14 }}>
-            <div style={{ padding: 16, border: "1px solid var(--border)", borderRadius: 18, background: "var(--surface-2)" }}>
+        <div className="tg-split-2">
+          <div style={{ display: "grid", gap: 14, alignContent: "start" }}>
+            <ModalSection title={secTx("contact")} icon={<I.user size={15} />} tone="accent">
               <div style={{ display: "grid", gap: 14 }}>
                 <Field label={sx("fullName")} required><Input value={form.fullName} onChange={e => setF("fullName", e.target.value)} placeholder="Aziz Karimov" /></Field>
                 <Field label="Email" required><Input value={form.email} onChange={e => setF("email", e.target.value)} placeholder="aziz@bogotarmadanrg.uz" type="email" /></Field>
                 <Field label="Telefon"><Input value={form.phone} onChange={e => setF("phone", e.target.value)} placeholder="+998 90 123 45 67" /></Field>
                 <Field label={editUser ? sx("newPassword") : t("common.password")} hint={editUser ? sx("leaveBlank") : undefined}><Input value={form.password} onChange={e => setF("password", e.target.value)} type="password" placeholder={editUser ? sx("newPassword") : sx("minEight")} /></Field>
               </div>
-            </div>
+            </ModalSection>
 
-            <div style={{ padding: 16, border: "1px solid var(--border)", borderRadius: 18, background: "var(--surface-2)" }}>
+            <ModalSection title={sx("role")} icon={<I.shield size={15} />} tone={USER_ROLE_META[form.role]?.color || "accent"}>
               <div style={{ display: "grid", gridTemplateColumns: hasRegionField ? "1fr 1fr" : "1fr", gap: 14 }}>
                 <Field label={sx("role")}>
                   <Select
@@ -896,20 +906,14 @@ function UsersPage() {
               <div style={{ marginTop: 14 }}>
                 <Field label={t("common.status")}><Select value={form.status} onChange={v => setF("status", v)} options={[{ value: "active", label: sx("active") }, { value: "inactive", label: sx("inactive") }]} /></Field>
               </div>
-            </div>
+            </ModalSection>
           </div>
 
-          <div style={{ padding: 16, border: "1px solid var(--border)", borderRadius: 18, background: "var(--surface-2)", minHeight: 420 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 14 }}>
-              <div>
-                <div className="tg-section-title" style={{ marginBottom: 4 }}>{sx("permissions")}</div>
-                <div className="tg-cell-sub">{form.role === "developer" ? sx("developerAccessHint") : sx("permissionManualHint")}</div>
-              </div>
-              {form.role !== "developer" ? <div style={{ display: "flex", gap: 8 }}>
-                <Button variant="soft" size="sm" onClick={applyRoleDefaults}>{sx("roleDefaults")}</Button>
-                <Button variant="ghost" size="sm" onClick={() => setF("permissions", [])}>{sx("clear")}</Button>
-              </div> : null}
-            </div>
+          <ModalSection title={sx("permissions")} subtitle={form.role === "developer" ? sx("developerAccessHint") : sx("permissionManualHint")} icon={<I.lock size={15} />} tone="violet"
+            action={form.role !== "developer" ? <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <Button variant="soft" size="sm" onClick={applyRoleDefaults}>{sx("roleDefaults")}</Button>
+              <Button variant="ghost" size="sm" onClick={() => setF("permissions", [])}>{sx("clear")}</Button>
+            </div> : null}>
 
             {form.role === "developer" ? (
               <div style={{ display: "grid", placeItems: "center", minHeight: 300, borderRadius: 16, border: "1px dashed var(--border)", background: "color-mix(in srgb, var(--violet) 10%, var(--surface-2))", textAlign: "center", padding: 20 }}>
@@ -920,9 +924,9 @@ function UsersPage() {
                 </div>
               </div>
             ) : (
-              <div style={{ display: "grid", gap: 12, maxHeight: 520, overflowY: "auto", paddingRight: 4 }}>
+              <div style={{ display: "grid", gap: 12 }}>
                 {permissionGroups.map(([moduleKey, permissions]) => (
-                  <div key={moduleKey} style={{ border: "1px solid var(--border)", borderRadius: 16, background: "var(--surface)", padding: 14 }}>
+                  <div key={moduleKey} {...sideLine(permissions.some((permission) => form.permissions.includes(permission.code)) ? "accent" : "neutral", { style: { border: "1px solid var(--border)", borderRadius: 16, background: "var(--surface-2)", padding: "14px 14px 14px 17px" } })}>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 12 }}>
                       <div style={{ fontWeight: 700 }}>{userModuleLabel(moduleKey)}</div>
                       <Badge color="slate" size="sm">{permissions.filter((permission) => form.permissions.includes(permission.code)).length}/{permissions.length}</Badge>
@@ -960,10 +964,12 @@ function UsersPage() {
                 ))}
               </div>
             )}
-          </div>
+          </ModalSection>
         </div>
       </Modal>
-      <Modal open={!!viewUser} onClose={() => setViewUser(null)} title={sx("userDetails")} icon={<I.user size={18} />} width={720}
+      <Modal open={!!viewUser} onClose={() => setViewUser(null)} title={viewUser?.fullName || sx("userDetails")} subtitle={[sx("userDetails"), viewUser?.username ? "@" + viewUser.username : ""].filter(Boolean).join(" · ")}
+        badge={viewUser ? <Badge color={USER_ROLE_META[viewUser.role]?.color || "slate"} size="sm">{roleUiLabel(viewUser.role)}</Badge> : null}
+        tone={viewUser ? (viewUser.status === "active" ? (USER_ROLE_META[viewUser.role]?.color || "accent") : "neutral") : "accent"} icon={<I.user size={18} />} width={760}
         footer={<>
           <Button variant="ghost" onClick={() => setViewUser(null)}>{t("common.cancel")}</Button>
           {canManageUsers && viewUser && canManageTargetUser(currentUser, viewUser) ? <Button variant="soft" icon={<I.edit size={14} />} onClick={() => {
@@ -973,20 +979,21 @@ function UsersPage() {
           }}>{sx("edit")}</Button> : null}
         </>}>
         {viewUser && (
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, .95fr) minmax(280px, 1.05fr)", gap: 16 }}>
-            <div className="tg-meta" style={{ padding: 16, border: "1px solid var(--border)", borderRadius: 18, background: "var(--surface-2)" }}>
-              <div className="tg-meta-row"><span className="tg-meta-k">{sx("user")}</span><span className="tg-meta-v">{viewUser.fullName}</span></div>
-              <div className="tg-meta-row"><span className="tg-meta-k">Email</span><span className="tg-meta-v">{viewUser.email}</span></div>
-              <div className="tg-meta-row"><span className="tg-meta-k">{sx("phoneField")}</span><span className="tg-meta-v">{viewUser.phone}</span></div>
-              <div className="tg-meta-row"><span className="tg-meta-k">{sx("role")}</span><span className="tg-meta-v"><Badge color={USER_ROLE_META[viewUser.role]?.color || "slate"}>{roleUiLabel(viewUser.role)}</Badge></span></div>
-              {hasRegionField && viewUser.region ? <div className="tg-meta-row"><span className="tg-meta-k">{sx("region")}</span><span className="tg-meta-v">{viewUser.region}</span></div> : null}
-              <div className="tg-meta-row"><span className="tg-meta-k">{t("common.status")}</span><span className="tg-meta-v"><StatusBadge status={viewUser.status === "active" ? "active" : "inactive"} label={viewUser.status === "active" ? sx("active") : sx("inactive")} /></span></div>
-              <div className="tg-meta-row"><span className="tg-meta-k">{sx("added")}</span><span className="tg-meta-v">{fmtDate(viewUser.createdAt)}</span></div>
-              <div className="tg-meta-row"><span className="tg-meta-k">Username</span><span className="tg-meta-v">{viewUser.username || "-"}</span></div>
-            </div>
+          <div className="tg-split-2">
+            <ModalSection title={secTx("contact")} icon={<I.user size={15} />} tone="accent">
+              <InfoGrid cols={1}>
+                <InfoRow label={sx("user")} value={viewUser.fullName} />
+                <InfoRow label="Email" value={viewUser.email} />
+                <InfoRow label={sx("phoneField")} value={viewUser.phone} />
+                <InfoRow tone={USER_ROLE_META[viewUser.role]?.color || undefined} label={sx("role")} value={roleUiLabel(viewUser.role)} />
+                {hasRegionField && viewUser.region ? <InfoRow label={sx("region")} value={viewUser.region} /> : null}
+                <InfoRow tone={viewUser.status === "active" ? "green" : "neutral"} label={t("common.status")} value={viewUser.status === "active" ? sx("active") : sx("inactive")} />
+                <InfoRow label={sx("added")} value={fmtDate(viewUser.createdAt)} />
+                <InfoRow label="Username" value={viewUser.username || "-"} />
+              </InfoGrid>
+            </ModalSection>
 
-            <div style={{ padding: 16, border: "1px solid var(--border)", borderRadius: 18, background: "var(--surface-2)" }}>
-              <div className="tg-section-title" style={{ marginBottom: 10 }}>{sx("permissions")}</div>
+            <ModalSection title={sx("permissions")} icon={<I.lock size={15} />} tone="violet">
               {viewUser.role === "developer" ? (
                 <div style={{ display: "grid", gap: 10 }}>
                   <Badge color="violet" size="sm">{sx("fullAccess")}</Badge>
@@ -999,7 +1006,7 @@ function UsersPage() {
               ) : (
                 <div className="tg-cell-sub">{sx("noExtraPermissions")}</div>
               )}
-            </div>
+            </ModalSection>
           </div>
         )}
       </Modal>
@@ -1071,7 +1078,7 @@ function SettingsPage() {
                 <thead><tr><th>{sx("nameField")}</th><th>Model</th><th>Temperature</th><th>{sx("active")}</th><th>{sx("functionCalling")}</th><th></th></tr></thead>
                 <tbody>
                   {(data.aiSettings || []).map((setting) => (
-                    <tr key={setting.id}>
+                    <tr key={setting.id} data-tone="1" style={{ "--sl": toneColor(setting.is_active || activeAiMap[setting.id || setting.name] ? "green" : "neutral") }}>
                       <td className="tg-cell-strong">{setting.name}</td>
                       <td>{setting.model}</td>
                       <td>{setting.temperature}</td>
@@ -1129,20 +1136,24 @@ function SettingsPage() {
         </div>
       )}
 
-      <Modal open={aiModalOpen} onClose={() => setAiModalOpen(false)} title={editAi ? sx("editAiSetting") : sx("newAiSetting")} icon={<I.robot size={18} />} width={560}
+      <Modal open={aiModalOpen} onClose={() => setAiModalOpen(false)} title={editAi ? sx("editAiSetting") : sx("newAiSetting")} subtitle={editAi?.name || undefined} tone={aiForm.is_active ? "green" : "amber"} icon={<I.robot size={18} />} width={600}
         footer={<><Button variant="ghost" onClick={() => setAiModalOpen(false)}>{t("common.cancel")}</Button><Button variant="primary" onClick={saveAiSetting}>{t("common.save")}</Button></>}>
-        <div style={{ display: "grid", gap: 14 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+        <ModalSection title={secTx("main")} icon={<I.robot size={15} />} tone="amber">
+          <div className="tg-fgrid">
             <Field label={t("common.name")}><Input value={aiForm.name} onChange={(e) => setAiField("name", e.target.value)} /></Field>
             <Field label="Model"><Input value={aiForm.model} onChange={(e) => setAiField("model", e.target.value)} /></Field>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+        </ModalSection>
+        <ModalSection title={secTx("settings")} icon={<I.sliders size={15} />} tone={aiForm.is_active ? "green" : "neutral"}>
+          <div className="tg-fgrid">
             <Field label="Temperature"><Input type="number" step="0.1" value={aiForm.temperature} onChange={(e) => setAiField("temperature", e.target.value)} /></Field>
             <Field label={sx("active")}><Toggle checked={!!aiForm.is_active} onChange={(value) => setAiField("is_active", value)} /></Field>
           </div>
           <Field label={sx("functionCalling")}><Toggle checked={!!aiForm.function_calling_enabled} onChange={(value) => setAiField("function_calling_enabled", value)} /></Field>
+        </ModalSection>
+        <ModalSection title={sx("systemPrompt")} icon={<I.message size={15} />} tone="violet">
           <Field label={sx("systemPrompt")}><Textarea rows={6} value={aiForm.system_prompt} onChange={(e) => setAiField("system_prompt", e.target.value)} /></Field>
-        </div>
+        </ModalSection>
       </Modal>
 
       <ConfirmDialog
@@ -1194,7 +1205,7 @@ function NotificationsPage() {
         {filtered.map(n => {
           const Ico = I[TYPE_ICON[n.type] || "bell"];
           return (
-            <Card key={n.id} hover style={{ borderLeft: n.read ? undefined : `3px solid var(--accent)`, opacity: n.read ? 0.75 : 1 }}>
+            <Card key={n.id} hover {...sideLine(n.read ? "neutral" : (TYPE_COLOR[n.type] && TYPE_COLOR[n.type] !== "slate" ? TYPE_COLOR[n.type] : "accent"), { active: !n.read, style: { opacity: n.read ? 0.78 : 1 } })}>
               <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
                 <div style={{ width: 38, height: 38, borderRadius: 10, background: `var(--${TYPE_COLOR[n.type] || "slate"}-bg, var(--surface-2))`, display: "grid", placeItems: "center", flexShrink: 0 }}>
                   <Ico size={17} style={{ color: `var(--${TYPE_COLOR[n.type] || "text-3"})` }} />
@@ -1205,7 +1216,7 @@ function NotificationsPage() {
                   <div style={{ fontSize: 12, color: "var(--text-3)", marginTop: 3 }}>{timeAgo(n.createdAt)}</div>
                 </div>
                 {!n.read && (
-                  <button style={{ border: "none", background: "none", cursor: "pointer", color: "var(--text-3)", padding: 4 }} onClick={() => { markNotificationRead(n.id).catch(() => null); }}>
+                  <button aria-label={sx("unread")} style={{ border: "none", background: "none", cursor: "pointer", color: "var(--text-3)", padding: 8, margin: -4, borderRadius: 8 }} onClick={() => { markNotificationRead(n.id).catch(() => null); }}>
                     <I.checkCircle size={16} />
                   </button>
                 )}
@@ -1323,7 +1334,7 @@ function AuditPage() {
                     const targetLabel = a.metadata?.target_label || a.target_type || "";
                     const targetRepr = a.target_repr || "";
                     return (
-                      <tr key={a.id}>
+                      <tr key={a.id} data-tone="1" style={{ "--sl": toneColor(ACT_COLOR[a.action] || "neutral") }}>
                         <td>
                           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                             <Avatar name={userMap[a.actor]?.fullName || a.actor_username} size={26} />
@@ -1416,8 +1427,8 @@ function IntegrationsPage() {
   const events = data.integrationEvents || [];
 
   const IntCard = ({ int }) => (
-    <Card hover>
-      <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
+    <Card hover {...sideLine(int.connected ? int.color : "neutral", { active: int.connected })}>
+      <div style={{ display: "flex", gap: 14, alignItems: "flex-start", flexWrap: "wrap" }}>
         <div style={{ width: 44, height: 44, borderRadius: 12, background: int.color + "22", border: `1.5px solid ${int.color}44`, display: "grid", placeItems: "center", flexShrink: 0 }}>
           {React.createElement(I[int.icon] || I.zap, { size: 20, style: { color: int.color } })}
         </div>
@@ -1430,7 +1441,6 @@ function IntegrationsPage() {
         </div>
         <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
           <Button variant="soft" size="sm" icon={<I.edit size={14} />} onClick={() => openEdit(int.raw)}>{sx("editBtn")}</Button>
-          <Button variant="soft" size="sm" icon={<I.doc size={14} />} onClick={() => toast(JSON.stringify(int.raw, null, 2), "info")}>JSON</Button>
         </div>
       </div>
     </Card>
@@ -1463,8 +1473,8 @@ function IntegrationsPage() {
             {aiSettings.length ? (
               <div className="tg-meta">
                 {aiSettings.map((setting) => (
-                  <div key={setting.id || setting.name} className="tg-meta-row">
-                    <span className="tg-meta-k">{setting.name || setting.provider || setting.id}</span>
+                  <div key={setting.id || setting.name} {...sideLine(setting.is_active ? "green" : "neutral", { className: "tg-meta-row side-line-sm" })}>
+                    <span className="tg-meta-k">{setting.name || setting.provider || "—"}</span>
                     <span className="tg-meta-v">{setting.model || setting.status || (setting.is_active ? sx("active") : sx("inactive"))}</span>
                   </div>
                 ))}
@@ -1477,8 +1487,8 @@ function IntegrationsPage() {
             {events.length ? (
               <div className="tg-meta">
                 {events.slice(0, 8).map((event) => (
-                  <div key={event.id || event.name} className="tg-meta-row">
-                    <span className="tg-meta-k">{event.name || event.event_type || event.id}</span>
+                  <div key={event.id || event.name} {...sideLine("blue", { className: "tg-meta-row side-line-sm" })}>
+                    <span className="tg-meta-k">{event.name || event.event_type || "—"}</span>
                     <span className="tg-meta-v">{event.status || event.target || event.provider || "Event"}</span>
                   </div>
                 ))}
@@ -1490,23 +1500,25 @@ function IntegrationsPage() {
         </div>
       )}
 
-      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editConfig ? sx("editIntegration") : sx("newIntegrationModal")} icon={<I.link size={18} />} width={520}
+      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editConfig ? sx("editIntegration") : sx("newIntegrationModal")} subtitle={form.provider || undefined} tone={form.is_active ? (mapIntegration({ provider: form.provider }).color) : "neutral"} icon={<I.link size={18} />} width={560}
         footer={<><Button variant="ghost" onClick={() => setModalOpen(false)}>{sx("cancelShort")}</Button><Button variant="primary" onClick={async () => {
           await upsert("integrationConfigs", { ...editConfig, ...form });
           toast(editConfig ? sx("intUpdated") : sx("intAdded"));
           setModalOpen(false);
           setEditConfig(null);
         }}>{t("common.save")}</Button></>}>
-        <div style={{ display: "grid", gap: 14 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+        <ModalSection title={secTx("connection")} icon={<I.link size={15} />} tone="blue">
+          <div className="tg-fgrid">
             <Field label="Provider"><Input value={form.provider} onChange={(e) => setFormField("provider", e.target.value)} /></Field>
             <Field label={sx("keyLabel")}><Input value={form.key} onChange={(e) => setFormField("key", e.target.value)} /></Field>
           </div>
           <Field label={sx("valueLabel")}><Textarea rows={5} value={form.value} onChange={(e) => setFormField("value", e.target.value)} /></Field>
+        </ModalSection>
+        <ModalSection title={secTx("details")} icon={<I.doc size={15} />} tone={form.is_active ? "green" : "neutral"}>
           <Field label={sx("descLabel")}><Textarea rows={3} value={form.description} onChange={(e) => setFormField("description", e.target.value)} /></Field>
           <Field label={sx("activeLabel")}><Toggle checked={!!form.is_active} onChange={(value) => setFormField("is_active", value)} /></Field>
-          {editConfig?.id && <Button variant="ghost" size="sm" icon={<I.trash size={15} />} onClick={() => { setModalOpen(false); setDeleteConfig(editConfig); }}>{sx("delete")}</Button>}
-        </div>
+          {editConfig?.id && <div><Button variant="ghost" size="sm" icon={<I.trash size={15} />} onClick={() => { setModalOpen(false); setDeleteConfig(editConfig); }}>{sx("delete")}</Button></div>}
+        </ModalSection>
       </Modal>
 
       <ConfirmDialog

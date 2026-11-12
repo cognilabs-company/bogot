@@ -247,6 +247,11 @@ function taskBoardSignature(tasks, columns) {
   return order.map((task) => `${task.id}:${task.columnId}:${Number(task.position || 0)}`).join("|");
 }
 
+// Side-line colour for a task: overdue → red, otherwise its column colour
+function taskToneColor(task, columnColor) {
+  return isTaskOverdue(task) ? "var(--red)" : (columnColor || "var(--accent)");
+}
+
 function TaskBoardCard({ task, user, meta, interactive = true }) {
   const overdue = isTaskOverdue(task);
   return (
@@ -317,19 +322,23 @@ function TaskFormModal({ open, onClose, initial, initialColumnId = "" }) {
       open={open}
       onClose={onClose}
       title={initial ? tskTx("taskFormEdit") : tskTx("taskFormNew")}
-      icon={<I.checkCircle size={18} />}
-      width={520}
+      subtitle={initial?.title || undefined}
+      tone={(columns.find((column) => column.id === form.columnId) || {}).color || "accent"}
+      icon={initial ? <I.edit size={18} /> : <I.checkCircle size={18} />}
+      width={560}
       footer={<><Button variant="ghost" onClick={onClose}>{tskTx("cancel")}</Button><Button variant="primary" onClick={save}>{tskTx("save")}</Button></>}
     >
-      <div style={{ display: "grid", gap: 14 }}>
+      <ModalSection title={secTx("main")} icon={<I.checkCircle size={15} />} tone={(columns.find((column) => column.id === form.columnId) || {}).color || "accent"}>
         <Field label={tskTx("fieldTitle")} required><Input value={form.title} onChange={(event) => set("title", event.target.value)} placeholder={tskTx("taskPh")} /></Field>
         <Field label={tskTx("fieldDesc")}><Textarea value={form.description || ""} onChange={(event) => set("description", event.target.value)} placeholder={tskTx("descPh")} rows={4} /></Field>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+      </ModalSection>
+      <ModalSection title={secTx("planning")} icon={<I.calendar size={15} />} tone="blue">
+        <div className="tg-fgrid">
           <Field label={tskTx("fieldColumn")}><Select value={form.columnId} onChange={(value) => set("columnId", value)} options={columns.map((column) => ({ value: column.id, label: column.name }))} /></Field>
           <Field label={tskTx("fieldAssigned")}><Select value={form.assignedUserId} onChange={(value) => set("assignedUserId", value)} options={assignees.map((user) => ({ value: user.id, label: user.fullName }))} /></Field>
         </div>
         <Field label={tskTx("fieldDeadline")}><DatePickerInput mode="datetime" value={form.dueDate} onChange={(value) => set("dueDate", value)} /></Field>
-      </div>
+      </ModalSection>
     </Modal>
   );
 }
@@ -382,14 +391,18 @@ function TaskColumnModal({ open, onClose, initialPosition = 0, initial = null, o
       open={open}
       onClose={onClose}
       title={initial ? tskTx("colFormEdit") : tskTx("colFormNew")}
+      subtitle={form.name || undefined}
+      tone={form.color || "accent"}
       icon={<I.layers size={18} />}
-      width={460}
+      width={480}
       footer={<><Button variant="ghost" onClick={onClose}>{tskTx("cancel")}</Button><Button variant="primary" onClick={save}>{tskTx("save")}</Button></>}
     >
-      <div style={{ display: "grid", gap: 14 }}>
+      <ModalSection title={secTx("main")} icon={<I.layers size={15} />} tone={form.color || "accent"}>
         <Field label={tskTx("fieldColumnName")} required><Input value={form.name} onChange={(event) => setName(event.target.value)} placeholder={tskTx("columnPh")} /></Field>
         <Field label={tskTx("fieldSlug")}><Input value={form.slug} onChange={(event) => setSlug(event.target.value)} placeholder={tskTx("slugPh")} /></Field>
         <Field label={tskTx("fieldOrder")}><Input type="number" min="1" value={form.position} onChange={(event) => set("position", event.target.value)} /></Field>
+      </ModalSection>
+      <ModalSection title={secTx("appearance")} icon={<I.palette size={15} />} tone={form.color || "accent"}>
         <Field label={tskTx("fieldColor")}>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {TASK_COLUMN_COLOR_OPTIONS.map((color) => (
@@ -404,24 +417,30 @@ function TaskColumnModal({ open, onClose, initialPosition = 0, initial = null, o
                   border: form.color === color ? `2px solid ${color}` : "1px solid var(--border)",
                   background: color,
                   boxShadow: form.color === color ? `0 0 0 3px ${hexToSoftBg(color)}` : "none",
+                  cursor: "pointer",
                 }}
               />
             ))}
           </div>
         </Field>
-      </div>
+      </ModalSection>
     </Modal>
   );
 }
 
 function TaskViewModal({ task, user, column, open, onClose, onEdit, onDelete }) {
+  const overdue = task ? isTaskOverdue(task) : false;
+  const tone = task ? taskToneColor(task, column?.color) : "accent";
   return (
     <Modal
       open={open}
       onClose={onClose}
-      title={tskTx("viewTitle")}
+      title={task?.title || tskTx("viewTitle")}
+      subtitle={tskTx("viewTitle")}
+      badge={task ? <span className="tg-badge" style={{ color: toneColor(tone), background: `color-mix(in srgb, ${toneColor(tone)} 13%, transparent)`, fontSize: 11 }}>{overdue ? tskTx("overdue") : column?.name || tskTx("unassigned")}</span> : null}
+      tone={tone}
       icon={<I.checkCircle size={18} />}
-      width={520}
+      width={540}
       footer={
         <>
           {onEdit && <Button variant="default" onClick={onEdit} icon={<I.edit size={15} />}>{tskTx("edit")}</Button>}
@@ -430,21 +449,20 @@ function TaskViewModal({ task, user, column, open, onClose, onEdit, onDelete }) 
       }
     >
       {task && (
-        <div style={{ display: "grid", gap: 16 }}>
-          <div className="tg-meta">
-            <div className="tg-meta-row"><span className="tg-meta-k">{tskTx("metaTitle")}</span><span className="tg-meta-v">{task.title}</span></div>
-            <div className="tg-meta-row"><span className="tg-meta-k">{tskTx("metaColumn")}</span><span className="tg-meta-v">{column?.name || tskTx("unassigned")}</span></div>
-            <div className="tg-meta-row"><span className="tg-meta-k">{tskTx("metaAssigned")}</span><span className="tg-meta-v">{user?.fullName || tskTx("unassignedUser")}</span></div>
-            <div className="tg-meta-row"><span className="tg-meta-k">{tskTx("metaDeadline")}</span><span className="tg-meta-v">{fmtDate(task.dueDate, true)}</span></div>
-            <div className="tg-meta-row"><span className="tg-meta-k">{tskTx("metaStatus")}</span><span className="tg-meta-v">{isTaskOverdue(task) ? tskTx("overdue") : column?.name || tskTx("unassigned")}</span></div>
-          </div>
-          <div>
-            <div className="tg-section-title">{tskTx("fieldDesc")}</div>
-            <div style={{ padding: 14, borderRadius: 12, background: "var(--surface-2)", border: "1px solid var(--border)", fontSize: 13.5, lineHeight: 1.6 }}>
-              {task.description || tskTx("noDesc")}
-            </div>
-          </div>
-        </div>
+        <>
+          <ModalSection title={secTx("details")} icon={<I.list size={15} />} tone={tone}>
+            <InfoGrid>
+              <InfoRow full label={tskTx("metaTitle")} value={task.title} />
+              <InfoRow tone={column?.color || undefined} label={tskTx("metaColumn")} value={column?.name || tskTx("unassigned")} />
+              <InfoRow icon={<I.user size={13} />} label={tskTx("metaAssigned")} value={user?.fullName || tskTx("unassignedUser")} />
+              <InfoRow tone={overdue ? "red" : undefined} icon={<I.calendar size={13} />} label={tskTx("metaDeadline")} value={fmtDate(task.dueDate, true)} />
+              <InfoRow tone={tone} label={tskTx("metaStatus")} value={overdue ? tskTx("overdue") : column?.name || tskTx("unassigned")} />
+            </InfoGrid>
+          </ModalSection>
+          <ModalSection title={tskTx("fieldDesc")} icon={<I.note size={15} />} tone="neutral">
+            <div className="tg-note-box">{task.description || tskTx("noDesc")}</div>
+          </ModalSection>
+        </>
       )}
     </Modal>
   );
@@ -724,7 +742,7 @@ function TasksPage() {
                       onClick={() => handleCardClick(task)}
                       style={{
                         "--idx": index,
-                        "--task-color": meta.color,
+                        "--task-color": isTaskOverdue(task) ? "#dc2626" : meta.color,
                         "--task-soft": hexToSoftBg(meta.color, 0.12),
                         "--task-soft-strong": hexToSoftBg(meta.color, 0.2),
                       }}

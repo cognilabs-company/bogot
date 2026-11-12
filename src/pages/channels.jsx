@@ -89,7 +89,7 @@ function ChannelAIPage({ channel }) {
         <Card pad={false}>
           <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)" }}><strong>So'nggi suhbatlar</strong></div>
           {convs.map(cv => (
-            <div key={cv.id} style={{ display: "flex", gap: 12, padding: "14px 16px", borderBottom: "1px solid var(--border-soft)", alignItems: "center" }}>
+            <div key={cv.id} {...sideLine(cv.led ? "green" : "neutral", { className: "side-line-sm", style: { display: "flex", gap: 12, padding: "14px 16px 14px 19px", borderBottom: "1px solid var(--border-soft)", alignItems: "center" } })}>
               <Avatar name={cv.user} size={38} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>

@@ -186,7 +186,7 @@ function ProductDetailPage({ id }) {
         <Panel title={pdTx("panelSimilar")} subtitle={category} icon="layers" color="violet">
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             {similar.map((row) => (
-              <div key={row.id} style={{ cursor: "pointer", display: "flex", gap: 10, alignItems: "center" }} onClick={() => nav("/products/" + row.id)}>
+              <div key={row.id} {...sideLine(Number(row.stockQuantity) === 0 ? "red" : Number(row.stockQuantity) < 5 ? "amber" : "green", { lift: true, className: "tg-list-item side-line-sm" })} onClick={() => nav("/products/" + row.id)}>
                 <ProductPhoto product={row} size="table" />
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 12.5, fontWeight: 600 }}>{window.productDisplayName ? window.productDisplayName(row) : (row.name || row.model)}</div>

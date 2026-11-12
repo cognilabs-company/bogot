@@ -208,6 +208,7 @@ function LeadsPage() {
             selected={selected}
             onSelect={setSelected}
             onRowClick={r => setViewLead(r)}
+            rowTone={r => statusTone(r.pipelineStage)}
             pageSize={12}
             defaultSort={{ key: "score", dir: "desc" }}
             emptyState={<EmptyState icon={<I.target size={26} />} title={ldTx("emptyLeads")} message={ldTx("emptyMsg")} action={<Button variant="primary" size="sm" icon={<I.plus size={15} />} onClick={() => setAddOpen(true)}>{ldTx("newLead")}</Button>} />}
@@ -225,10 +226,10 @@ function LeadsPage() {
         ops={ops}
       />
       <LeadFormModal open={!!editLead} onClose={() => setEditLead(null)} initial={editLead} onSave={(lead) => { upsert("leads", lead); toast(ldTx("leadUpdated")); setEditLead(null); }} ops={ops} />
-      <Modal open={bulkStatus} onClose={() => setBulkStatus(false)} title={ldTx("changeStage")} width={360}>
+      <Modal open={bulkStatus} onClose={() => setBulkStatus(false)} title={ldTx("changeStage")} subtitle={`${selected.length} ✓`} icon={<I.flag size={18} />} width={380}>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {PIPELINE_STAGES.map(s => (
-            <button key={s} className="tg-btn tg-btn-default" onClick={() => bulkSetStatus(s)} style={{ justifyContent: "flex-start", padding: "10px 14px", borderRadius: 10, width: "100%" }}>
+            <button key={s} {...sideLine(statusTone(s), { className: "tg-btn tg-btn-default side-line-sm" })} onClick={() => bulkSetStatus(s)} style={{ "--sl": toneColor(statusTone(s)), justifyContent: "flex-start", padding: "10px 14px 10px 16px", borderRadius: 10, width: "100%" }}>
               <StatusBadge status={s} label={PIPELINE_STAGE_UZ[s]} />
             </button>
           ))}
@@ -258,27 +259,37 @@ function LeadsPage() {
   );
 }
 
-function LeadViewModal({ open, onClose, onEdit, onDelete, lead, ops }) {
+function LeadViewModal({ open, onClose, onEdit, onDelete, lead: leadProp, ops }) {
+  const { t } = useApp();
+  const lead = useLastValue(leadProp);
   if (!lead) return null;
   const assignee = ops.find(o => o.id === lead.assignedUserId);
+  const tone = statusTone(lead.pipelineStage);
   return (
-    <Modal open={open} onClose={onClose} title={ldTx("viewTitle")} icon={<I.target size={18} />} width={520}
+    <Modal open={open} onClose={onClose} title={lead.fullName || ldTx("viewTitle")} subtitle={[ldTx("viewTitle"), lead.phone].filter(Boolean).join(" · ")}
+      badge={<StatusBadge status={lead.pipelineStage} label={PIPELINE_STAGE_UZ[lead.pipelineStage]} />} tone={tone} icon={<I.target size={18} />} width={560}
       footer={<>
         {onEdit && <Button variant="ghost" icon={<I.edit size={15} />} onClick={onEdit}>{ldTx("edit")}</Button>}
         {onDelete && <Button variant="danger" icon={<I.trash size={15} />} onClick={onDelete}>{ldTx("delete")}</Button>}
         <Button variant="primary" onClick={onClose}>{window.TRANSLATIONS?.[window.__TG_LANG || "uz"]?.["common.close"] || "Yopish"}</Button>
       </>}>
-      <div className="tg-meta">
-        <div className="tg-meta-row"><span className="tg-meta-k">{ldTx("viewLead")}</span><span className="tg-meta-v">{lead.fullName}</span></div>
-        <div className="tg-meta-row"><span className="tg-meta-k">{ldTx("viewPhone")}</span><span className="tg-meta-v">{lead.phone}</span></div>
-        <div className="tg-meta-row"><span className="tg-meta-k">{ldTx("viewSource")}</span><span className="tg-meta-v">{SOURCE_UZ[lead.source]}</span></div>
-        <div className="tg-meta-row"><span className="tg-meta-k">{ldTx("viewNeed")}</span><span className="tg-meta-v">{lead.requiredPowerKw} kW • {lead.propertyType}</span></div>
-        <div className="tg-meta-row"><span className="tg-meta-k">{ldTx("viewPayment")}</span><span className="tg-meta-v">{lead.paymentTypeLabel}</span></div>
-        <div className="tg-meta-row"><span className="tg-meta-k">{ldTx("viewStage")}</span><span className="tg-meta-v">{PIPELINE_STAGE_UZ[lead.pipelineStage]}</span></div>
-        <div className="tg-meta-row"><span className="tg-meta-k">{ldTx("viewPriority")}</span><span className="tg-meta-v">{lead.priority}</span></div>
-        <div className="tg-meta-row"><span className="tg-meta-k">{ldTx("viewAssigned")}</span><span className="tg-meta-v">{assignee ? assignee.fullName : ldTx("unassigned")}</span></div>
-        <div className="tg-meta-row"><span className="tg-meta-k">{ldTx("viewValue")}</span><span className="tg-meta-v">{fmtUZS(lead.estimatedValue)}</span></div>
-      </div>
+      <ModalSection title={secTx("contact")} icon={<I.user size={15} />} tone="accent">
+        <InfoGrid>
+          <InfoRow label={ldTx("viewLead")} value={lead.fullName} />
+          <InfoRow icon={<I.phone size={13} />} label={ldTx("viewPhone")} value={lead.phone} />
+          <InfoRow label={ldTx("viewSource")} value={SOURCE_UZ[lead.source]} />
+          <InfoRow label={ldTx("viewAssigned")} value={assignee ? assignee.fullName : ldTx("unassigned")} />
+        </InfoGrid>
+      </ModalSection>
+      <ModalSection title={secTx("details")} icon={<I.sun size={15} />} tone={tone}>
+        <InfoGrid>
+          <InfoRow label={ldTx("viewNeed")} value={`${lead.requiredPowerKw} kW • ${lead.propertyType}`} />
+          <InfoRow label={ldTx("viewPayment")} value={lead.paymentTypeLabel} />
+          <InfoRow tone={tone} label={ldTx("viewStage")} value={PIPELINE_STAGE_UZ[lead.pipelineStage]} />
+          <InfoRow tone={statusTone(lead.priority)} label={ldTx("viewPriority")} value={t("priority." + lead.priority)} />
+          <InfoRow full tone="green" label={ldTx("viewValue")} value={fmtUZS(lead.estimatedValue)} />
+        </InfoGrid>
+      </ModalSection>
     </Modal>
   );
 }
@@ -353,14 +364,16 @@ function LeadFormModal({ open, onClose, onSave, ops, initial }) {
   };
 
   return (
-    <Modal open={open} onClose={onClose} title={initial ? ldTx("formEditTitle") : ldTx("formNewTitle")} icon={<I.target size={18} />} width={520}
+    <Modal open={open} onClose={onClose} title={initial ? ldTx("formEditTitle") : ldTx("formNewTitle")} subtitle={initial?.fullName || undefined} tone={statusTone(form.pipelineStage)} icon={initial ? <I.edit size={18} /> : <I.target size={18} />} width={560}
       footer={<><Button variant="ghost" onClick={onClose}>{ldTx("cancel")}</Button><Button variant="primary" onClick={save}>{ldTx("save")}</Button></>}>
-      <div style={{ display: "grid", gap: 14 }}>
+      <ModalSection title={secTx("contact")} icon={<I.user size={15} />} tone="accent">
         <Field label={ldTx("fieldFullName")} required><Input value={form.fullName} onChange={e => set("fullName", e.target.value)} placeholder="Aziz Karimov" /></Field>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
           <Field label={ldTx("fieldPhone")}><Input value={form.phone} onChange={e => set("phone", e.target.value)} /></Field>
           <Field label={ldTx("fieldSource")}><Select value={form.source} onChange={v => set("source", v)} options={SOURCES.map(s => ({ value: s, label: SOURCE_UZ[s] }))} /></Field>
         </div>
+      </ModalSection>
+      <ModalSection title={secTx("details")} icon={<I.sun size={15} />} tone={statusTone(form.pipelineStage)}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
           <Field label={ldTx("fieldPower")}><Input type="number" value={form.requiredPowerKw} onChange={e => set("requiredPowerKw", +e.target.value)} /></Field>
           <Field label={ldTx("fieldProperty")}><Select value={form.propertyType} onChange={v => set("propertyType", v)} options={["Hovli", "Ofis", "Do'kon", "Ferma", "Ombor"].map(v => ({ value: v, label: v }))} /></Field>
@@ -373,7 +386,7 @@ function LeadFormModal({ open, onClose, onSave, ops, initial }) {
           <Field label={ldTx("fieldStage")}><Select value={form.pipelineStage} onChange={v => set("pipelineStage", v)} options={PIPELINE_STAGES.map(s => ({ value: s, label: PIPELINE_STAGE_UZ[s] }))} /></Field>
           <Field label={ldTx("fieldPriority")}><Select value={form.priority} onChange={v => set("priority", v)} options={["low", "medium", "high", "urgent"].map(p => ({ value: p, label: t("priority." + p) }))} /></Field>
         </div>
-      </div>
+      </ModalSection>
     </Modal>
   );
 }

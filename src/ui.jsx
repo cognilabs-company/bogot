@@ -630,9 +630,123 @@ function Dropdown({ trigger, items, align = "right", width = 200, direction = "d
   );
 }
 
+// ---------- Side lines (coloured left accent bar) ----------
+const SIDE_LINE_TONES = ["accent", "green", "amber", "red", "blue", "violet", "cyan", "teal", "pink", "neutral", "slate"];
+// Resolve a tone name ("green", "accent", "neutral") or any raw CSS colour (e.g. a status colour "#22c55e") to a CSS value.
+function toneColor(tone) {
+  if (!tone) return "var(--accent)";
+  if (tone === "accent") return "var(--accent)";
+  if (tone === "neutral" || tone === "slate") return "var(--text-3)";
+  if (SIDE_LINE_TONES.includes(tone)) return `var(--${tone})`;
+  return tone;
+}
+// Map a status key to a tone, reusing the badge colours (STATUS_COLORS) plus page-specific overrides.
+function statusTone(status, overrides) {
+  if (overrides && overrides[status]) return overrides[status];
+  const c = STATUS_COLORS[status];
+  return c ? (c === "slate" ? "neutral" : c) : "neutral";
+}
+// Spread onto any element: <div {...sideLine("green", { active, className: "..." })} />
+function sideLine(tone, opts = {}) {
+  const { active, className = "", style, lift, size } = opts;
+  return {
+    className: ["side-line", lift ? "side-line-lift" : "", size ? "side-line-" + size : "", className].filter(Boolean).join(" "),
+    style: { ...(style || {}), "--sl": toneColor(tone) },
+    "data-active": active ? "1" : undefined,
+  };
+}
+function SideLine({ as: Tag = "div", tone, active, lift, size, className, style, children, ...rest }) {
+  return <Tag {...sideLine(tone, { active, lift, size, className, style })} {...rest}>{children}</Tag>;
+}
+
+// Shared section labels (uz/ru/en) from i18n.jsx, usable outside of React context.
+function secTx(key) {
+  const lang = window.__TG_LANG || "uz";
+  const T = window.TRANSLATIONS || {};
+  return T[lang]?.["sec." + key] || T.uz?.["sec." + key] || key;
+}
+
+// ---------- Modal building blocks ----------
+function ModalSection({ title, subtitle, icon, tone = "accent", action, children, className = "", bodyClassName = "" }) {
+  return (
+    <section className={"tg-msec " + className} style={{ "--sl": toneColor(tone) }}>
+      {(title || action) && (
+        <div className="tg-msec-head">
+          <span className="tg-msec-bar" aria-hidden="true" />
+          {icon && <span className="tg-msec-icon">{icon}</span>}
+          <div className="tg-msec-titles">
+            {title && <div className="tg-msec-title">{title}</div>}
+            {subtitle && <div className="tg-msec-sub">{subtitle}</div>}
+          </div>
+          {action && <div className="tg-msec-action">{action}</div>}
+        </div>
+      )}
+      <div className={"tg-msec-body " + bodyClassName}>{children}</div>
+    </section>
+  );
+}
+function InfoRow({ label, value, icon, tone, mono, full, hint }) {
+  return (
+    <div className="tg-info" data-full={full ? "1" : undefined} style={tone ? { "--sl": toneColor(tone) } : undefined} data-tone={tone ? "1" : undefined}>
+      <div className="tg-info-k">{icon}{label}</div>
+      <div className={"tg-info-v" + (mono ? " mono" : "")}>{value == null || value === "" ? "—" : value}</div>
+      {hint && <div className="tg-info-hint">{hint}</div>}
+    </div>
+  );
+}
+function InfoGrid({ children, cols = 2, className = "" }) {
+  return <div className={"tg-info-grid " + className} data-cols={cols}>{children}</div>;
+}
+
+// Remembers the last non-empty value, so an item modal can keep showing its item while it animates closed.
+function useLastValue(value) {
+  const ref = uR(value);
+  if (value != null) ref.current = value;
+  return value != null ? value : ref.current;
+}
+
+// Keeps the last rendered content around while the close animation plays.
+function useExitTransition(open, ms = 200) {
+  const [mounted, setMounted] = uS(open);
+  const [closing, setClosing] = uS(false);
+  uE(() => {
+    if (open) { setMounted(true); setClosing(false); return undefined; }
+    if (!mounted) return undefined;
+    const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduce) { setMounted(false); return undefined; }
+    setClosing(true);
+    const id = setTimeout(() => { setMounted(false); setClosing(false); }, ms);
+    return () => clearTimeout(id);
+  }, [open]);
+  return { mounted: open || mounted, closing: !open && closing };
+}
+
+function OverlayHead({ title, subtitle, icon, badge, onClose, closeLabel }) {
+  return (
+    <div className="tg-modal-head">
+      <div className="tg-modal-head-main">
+        {icon && <span className="tg-modal-icon">{icon}</span>}
+        <div className="tg-modal-titles">
+          <h3>{title}</h3>
+          {(subtitle || badge) && (
+            <div className="tg-modal-sub">
+              {badge}
+              {subtitle && <span className="tg-modal-sub-text">{subtitle}</span>}
+            </div>
+          )}
+        </div>
+      </div>
+      <IconButton icon={<I.x size={18} />} label={closeLabel} onClick={onClose} />
+    </div>
+  );
+}
+
 // ---------- Modal ----------
-function Modal({ open, onClose, title, children, footer, width = 540, icon }) {
+function Modal({ open, onClose, title, subtitle, badge, children, footer, width = 540, icon, tone = "accent" }) {
   const { t } = useApp();
+  const { mounted, closing } = useExitTransition(open);
+  const snapshot = uR(null);
+  if (open) snapshot.current = { title, subtitle, badge, children, footer, icon, tone };
   uE(() => {
     if (!open) return;
     const prevOverflow = document.body.style.overflow;
@@ -644,43 +758,39 @@ function Modal({ open, onClose, title, children, footer, width = 540, icon }) {
       document.removeEventListener("keydown", on);
     };
   }, [open, onClose]);
-  if (!open) return null;
+  if (!mounted || !snapshot.current) return null;
+  const v = open ? { title, subtitle, badge, children, footer, icon, tone } : snapshot.current;
   return (
-    <div className="tg-overlay" onMouseDown={onClose}>
-      <div className="tg-modal pop-in" style={{ maxWidth: width }} onMouseDown={e => e.stopPropagation()} role="dialog" aria-modal="true">
-        <div className="tg-modal-head">
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            {icon && <span className="tg-card-icon">{icon}</span>}
-            <h3>{title}</h3>
-          </div>
-          <IconButton icon={<I.x size={18} />} label={t("common.close")} onClick={onClose} />
-        </div>
-        <div className="tg-modal-body">{children}</div>
-        {footer && <div className="tg-modal-foot">{footer}</div>}
+    <div className="tg-overlay" data-closing={closing ? "1" : undefined} onMouseDown={open ? onClose : undefined}>
+      <div className="tg-modal" style={{ maxWidth: width, "--sl": toneColor(v.tone) }} onMouseDown={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={typeof v.title === "string" ? v.title : undefined}>
+        <OverlayHead title={v.title} subtitle={v.subtitle} badge={v.badge} icon={v.icon} onClose={onClose} closeLabel={t("common.close")} />
+        <div className="tg-modal-body">{v.children}</div>
+        {v.footer && <div className="tg-modal-foot">{v.footer}</div>}
       </div>
     </div>
   );
 }
 
 // ---------- Drawer ----------
-function Drawer({ open, onClose, title, children, footer, width = 460, side = "right" }) {
+function Drawer({ open, onClose, title, subtitle, badge, children, footer, width = 460, side = "right", icon, tone = "accent" }) {
   const { t } = useApp();
+  const { mounted, closing } = useExitTransition(open);
+  const snapshot = uR(null);
+  if (open) snapshot.current = { title, subtitle, badge, children, footer, icon, tone };
   uE(() => {
     if (!open) return;
     const on = (e) => e.key === "Escape" && onClose();
     document.addEventListener("keydown", on);
     return () => document.removeEventListener("keydown", on);
   }, [open, onClose]);
-  if (!open) return null;
+  if (!mounted || !snapshot.current) return null;
+  const v = open ? { title, subtitle, badge, children, footer, icon, tone } : snapshot.current;
   return (
-    <div className="tg-overlay" onMouseDown={onClose}>
-      <div className={"tg-drawer tg-drawer-" + side} style={{ maxWidth: width }} onMouseDown={e => e.stopPropagation()} role="dialog" aria-modal="true">
-        <div className="tg-modal-head">
-          <h3>{title}</h3>
-          <IconButton icon={<I.x size={18} />} label={t("common.close")} onClick={onClose} />
-        </div>
-        <div className="tg-drawer-body">{children}</div>
-        {footer && <div className="tg-modal-foot">{footer}</div>}
+    <div className="tg-overlay" data-closing={closing ? "1" : undefined} onMouseDown={open ? onClose : undefined}>
+      <div className={"tg-drawer tg-drawer-" + side} style={{ maxWidth: width, "--sl": toneColor(v.tone) }} onMouseDown={e => e.stopPropagation()} role="dialog" aria-modal="true">
+        <OverlayHead title={v.title} subtitle={v.subtitle} badge={v.badge} icon={v.icon} onClose={onClose} closeLabel={t("common.close")} />
+        <div className="tg-drawer-body">{v.children}</div>
+        {v.footer && <div className="tg-modal-foot">{v.footer}</div>}
       </div>
     </div>
   );
@@ -698,7 +808,7 @@ function ConfirmDialog({ open, onClose, onConfirm, title, message, confirmLabel 
   if (!open) return null;
   return (
     <div className="tg-confirm-overlay" onMouseDown={onClose}>
-      <section className="tg-confirm-dialog pop-in" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label={title}>
+      <section {...sideLine(danger ? "red" : "amber", { active: true, className: "tg-confirm-dialog pop-in side-line-full" })} onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label={title}>
         <div style={{ display: "grid", gap: 14 }}>
           <div style={{ display: "grid", gap: 10 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -985,7 +1095,8 @@ function PaginationBar({ page, total, pageSize, onChange }) {
 Object.assign(window, {
   Card, CardHead, Button, IconButton, Badge, StatusBadge, Avatar, Tabs, Segmented,
   SearchInput, Field, Input, Textarea, DatePickerInput, Select, Toggle, Dropdown, Modal, Drawer,
-  ConfirmDialog, EmptyState, SkeletonRows, useLoading, Progress, Delta, ACUnit,
+  ConfirmDialog, EmptyState, SkeletonRows,
+  SIDE_LINE_TONES, secTx, toneColor, useLastValue, statusTone, sideLine, SideLine, ModalSection, InfoRow, InfoGrid, useLoading, Progress, Delta, ACUnit,
   productImages, productImageSrc, ProductPhoto, ProductImageModal,
   ExportDropdown, formatUzDate, DATE_PICKER_MONTHS, DATE_PICKER_MONTHS_SHORT,
   PaginationBar,

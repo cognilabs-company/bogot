@@ -450,6 +450,7 @@ const customerStatusTone = (customer) => {
   return "blue";
 };
 const customerStatusColor = (customer) => customer?.statusColor || customer?.color || "";
+const customerRowTone = (customer) => (!customer?.statusId && !customer?.statusName) ? "neutral" : (customerStatusColor(customer) || customerStatusTone(customer));
 function statusColorToSoftBg(color, alpha = 0.14) {
   const clean = String(color || "").replace("#", "");
   if (!/^[0-9a-f]{6}$/i.test(clean)) return null;
@@ -727,7 +728,7 @@ function CustomersPage() {
           <Card pad={false}>
             {cusLoading ? <SkeletonRows rows={10} cols={7} /> : filtered.length === 0 ? (
               <EmptyState icon={<I.users size={26} />} title={(dateFrom || dateTo) ? ctx("noDateData") : ctx("noCustomers")} />
-            ) : <DataTable columns={columns} rows={filtered} onRowClick={r => setViewCustomer(r)} defaultSort={null} />}
+            ) : <DataTable columns={columns} rows={filtered} onRowClick={r => setViewCustomer(r)} defaultSort={null} rowTone={customerRowTone} />}
             {!cusLoading && filtered.length > 0 && <PaginationBar page={cusPage} total={cusTotal} pageSize={50} onChange={setCusPage} />}
           </Card>
         </>
@@ -740,7 +741,7 @@ function CustomersPage() {
             <StatTile label={ctx("customersWithStatus")} value={cusRows.filter((customer) => customer.statusId).length} color="amber" />
           </div>
           <Card pad={false}>
-            <DataTable columns={statusColumns} rows={sortedStatuses} onRowClick={openStatusEdit} defaultSort={{ key: "order", dir: "asc" }} />
+            <DataTable columns={statusColumns} rows={sortedStatuses} onRowClick={openStatusEdit} defaultSort={{ key: "order", dir: "asc" }} rowTone={(row) => row.color || (row.isDefault ? "green" : "blue")} />
           </Card>
         </div>
       )}
@@ -816,7 +817,7 @@ window.CustomersPage = CustomersPage;
 
 function CustomerStatusModal({ open, onClose, onSave, form, setField, defaultClientStatus, editing }) {
   return (
-    <Modal open={open} onClose={onClose} title={editing ? ctx("editStatus") : ctx("newStatus")} icon={<I.flag size={18} />} width={460}
+    <Modal open={open} onClose={onClose} title={editing ? ctx("editStatus") : ctx("newStatus")} subtitle={form.name ? localizeCustomerStatusName(form.name) : undefined} icon={<I.flag size={18} />} width={460} tone={form.color || "accent"}
       footer={<><Button variant="ghost" onClick={onClose}>{window.TRANSLATIONS?.[customerLang()]?.["common.cancel"] || "Bekor qilish"}</Button><Button variant="primary" onClick={onSave}>{ctx("save")}</Button></>}>
       <div style={{ display: "grid", gap: 14 }}>
         <Field label={ctx("statusName")} required><Input value={form.name} onChange={e => setField("name", e.target.value)} placeholder="Masalan, Faol mijoz" /></Field>
@@ -844,7 +845,7 @@ function CustomerStatusModal({ open, onClose, onSave, form, setField, defaultCli
             ))}
           </div>
         </Field>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, padding: "12px 14px", borderRadius: 12, background: "var(--surface-2)", border: "1px solid var(--border)" }}>
+        <div {...sideLine(form.isDefault ? "green" : "neutral", { active: !!form.isDefault, style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, padding: "12px 14px 12px 16px", borderRadius: 12, background: "var(--surface-2)", border: "1px solid var(--border)" } })}>
           <div>
             <div style={{ fontSize: 13, fontWeight: 650 }}>{ctx("primaryStatus")}</div>
             <div style={{ fontSize: 12, color: "var(--text-3)", marginTop: 2 }}>
@@ -860,15 +861,18 @@ function CustomerStatusModal({ open, onClose, onSave, form, setField, defaultCli
   );
 }
 
-function CustomerViewModal({ open, onClose, onEdit, onDelete, customer }) {
+function CustomerViewModal({ open, onClose, onEdit, onDelete, customer: customerProp }) {
   const { data } = useApp();
+  const customer = useLastValue(customerProp);
   const canManage = canDo("clients.manage", data);
   if (!customer) return null;
   const product = (data.products || []).find((row) => row.id === customer.productId);
-  const productLabel = product?.model || product?.name || product?.title || customer.productId || "";
+  const productLabel = product?.model || product?.name || product?.title || "";
   const customerSession = (data.conversations || []).find(s => s.clientId === customer.id);
   return (
-    <Modal open={open} onClose={onClose} title={ctx("customerDetails")} icon={<I.users size={18} />} width={760}
+    <Modal open={open} onClose={onClose} title={customer.fullName || ctx("customerDetails")} subtitle={[ctx("customerDetails"), customerTextValue(customer.phone, "")].filter(Boolean).join(" · ")}
+      badge={(!customer.statusId && !customer.statusName) ? <Badge color="slate" size="sm">{ctx("unspecified")}</Badge> : <StatusColorBadge color={customerStatusColor(customer)} tone={customerStatusTone(customer)} label={localizeCustomerStatusName(customer.statusName || customer.status)} />}
+      tone={customerRowTone(customer)} icon={<I.users size={18} />} width={760}
       footer={<>
         {customerSession && <Button variant="ghost" size="sm" icon={<I.message size={14} />} onClick={() => window.navTo("/inbox/" + customerSession.id)}>{ctx("openChat")}</Button>}
         {canManage && <Button variant="ghost" icon={<I.edit size={15} />} onClick={onEdit}>{ctx("edit")}</Button>}
@@ -876,14 +880,11 @@ function CustomerViewModal({ open, onClose, onEdit, onDelete, customer }) {
         <Button variant="primary" onClick={onClose}>{window.TRANSLATIONS?.[customerLang()]?.["common.close"] || "Yopish"}</Button>
       </>}>
       <div className="tg-customer-view-shell">
-        <section className="tg-customer-view-hero">
-          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+        <section {...sideLine(customerRowTone(customer), { active: true, className: "tg-customer-view-hero" })}>
+          <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
             <Avatar name={customer.fullName} size={52} />
             <div style={{ minWidth: 0 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                <h4 style={{ margin: 0, fontSize: 22, fontWeight: 800, letterSpacing: "-.03em" }}>{customer.fullName}</h4>
-                <StatusColorBadge color={customerStatusColor(customer)} tone={customerStatusTone(customer)} label={localizeCustomerStatusName(customer.statusName || customer.status)} />
-              </div>
+              <h4 style={{ margin: 0, fontSize: 20, fontWeight: 800, letterSpacing: "-.03em", overflowWrap: "anywhere" }}>{customer.fullName}</h4>
               <div className="tg-customer-view-pills">
                 <span className="tg-customer-view-pill"><SourceIcon source={customer.source} />{customerSourceLabel(customer.source)}</span>
                 <span className="tg-customer-view-pill"><I.box size={14} />{customerTextValue(productLabel, ctx("productNotSelected"))}</span>
@@ -891,74 +892,64 @@ function CustomerViewModal({ open, onClose, onEdit, onDelete, customer }) {
               </div>
             </div>
           </div>
-          <div className="tg-customer-view-kpis">
-            <div className="tg-customer-view-kpi"><span>{ctx("amountReceived")}</span><strong>{fmtUZS(customer.totalSpent)}</strong></div>
-            <div className="tg-customer-view-kpi"><span>{ctx("subsidyAmount")}</span><strong>{fmtUZS(customer.subsidyAmount)}</strong></div>
-            <div className="tg-customer-view-kpi"><span>{ctx("requestedPower")}</span><strong>{customer.currentSystemKw || 0} kW</strong></div>
-          </div>
+          <InfoGrid cols={3}>
+            <InfoRow tone="green" label={ctx("amountReceived")} value={fmtUZS(customer.totalSpent)} />
+            <InfoRow tone="violet" label={ctx("subsidyAmount")} value={fmtUZS(customer.subsidyAmount)} />
+            <InfoRow tone="amber" label={ctx("requestedPower")} value={`${customer.currentSystemKw || 0} kW`} />
+          </InfoGrid>
         </section>
 
-        <div className="tg-customer-view-grid">
-          <section className="tg-customer-view-card">
-            <div className="tg-customer-view-card-title">{ctx("primaryData")}</div>
-            <div className="tg-customer-view-meta">
-              <div className="tg-customer-view-row"><span>{ctx("phone")}</span><strong>{customerTextValue(customer.phone)}</strong></div>
-              <div className="tg-customer-view-row"><span>{ctx("source")}</span><strong>{customerSourceLabel(customer.source)}</strong></div>
-              <div className="tg-customer-view-row"><span>{window.TRANSLATIONS?.[customerLang()]?.["common.product"] || "Mahsulot"}</span><strong>{customerTextValue(productLabel, "Tanlanmagan")}</strong></div>
-              <div className="tg-customer-view-row"><span>{ctx("status")}</span><strong>{(!customer.statusId && !customer.statusName) ? ctx("unspecified") : localizeCustomerStatusName(customer.statusName || customer.status)}</strong></div>
-              <div className="tg-customer-view-row"><span>{window.TRANSLATIONS?.[customerLang()]?.["common.created"] || "Yaratilgan"}</span><strong>{customer.createdAt ? fmtDate(customer.createdAt, true) : ctx("notEntered")}</strong></div>
-              <div className="tg-customer-view-row"><span>{window.TRANSLATIONS?.[customerLang()]?.["common.updated"] || "Yangilangan"}</span><strong>{customer.updatedAt ? fmtDate(customer.updatedAt, true) : ctx("notEntered")}</strong></div>
-            </div>
-          </section>
+        <ModalSection title={ctx("primaryData")} icon={<I.user size={15} />} tone="accent">
+          <InfoGrid>
+            <InfoRow label={ctx("phone")} value={customerTextValue(customer.phone)} />
+            <InfoRow label={ctx("source")} value={customerSourceLabel(customer.source)} />
+            <InfoRow label={window.TRANSLATIONS?.[customerLang()]?.["common.product"] || "Mahsulot"} value={customerTextValue(productLabel, "Tanlanmagan")} />
+            <InfoRow tone={customerRowTone(customer)} label={ctx("status")} value={(!customer.statusId && !customer.statusName) ? ctx("unspecified") : localizeCustomerStatusName(customer.statusName || customer.status)} />
+            <InfoRow label={window.TRANSLATIONS?.[customerLang()]?.["common.created"] || "Yaratilgan"} value={customer.createdAt ? fmtDate(customer.createdAt, true) : ctx("notEntered")} />
+            <InfoRow label={window.TRANSLATIONS?.[customerLang()]?.["common.updated"] || "Yangilangan"} value={customer.updatedAt ? fmtDate(customer.updatedAt, true) : ctx("notEntered")} />
+          </InfoGrid>
+        </ModalSection>
 
-          <section className="tg-customer-view-card">
-            <div className="tg-customer-view-card-title">{ctx("locationProject")}</div>
-            <div className="tg-customer-view-meta">
-              <div className="tg-customer-view-row"><span>{ctx("tuman")}</span><strong>{customerTextValue(customerTuman(customer))}</strong></div>
-              <div className="tg-customer-view-row"><span>{ctx("mahalla")}</span><strong>{customerTextValue(customerMahalla(customer))}</strong></div>
-              <div className="tg-customer-view-row"><span>{ctx("address")}</span><strong>{customerTextValue(customer.address)}</strong></div>
-              <div className="tg-customer-view-row"><span>{ctx("requestedPower")}</span><strong>{customer.currentSystemKw || 0} kW</strong></div>
-              <div className="tg-customer-view-row"><span>{ctx("annualConsumption")}</span><strong>{customerTextValue(customer.annualConsumptionKwh, ctx("notEntered"))}</strong></div>
-              <div className="tg-customer-view-row"><span>{ctx("estimatedSubsidy")}</span><strong>{customerTextValue(customer.estimatedSubsidyKw, ctx("notEntered"))}</strong></div>
-            </div>
-          </section>
+        <ModalSection title={ctx("locationProject")} icon={<I.mapPin size={15} />} tone="blue">
+          <InfoGrid>
+            <InfoRow label={ctx("tuman")} value={customerTextValue(customerTuman(customer))} />
+            <InfoRow label={ctx("mahalla")} value={customerTextValue(customerMahalla(customer))} />
+            <InfoRow full label={ctx("address")} value={customerTextValue(customer.address)} />
+            <InfoRow label={ctx("requestedPower")} value={`${customer.currentSystemKw || 0} kW`} />
+            <InfoRow label={ctx("annualConsumption")} value={customerTextValue(customer.annualConsumptionKwh, ctx("notEntered"))} />
+            <InfoRow label={ctx("estimatedSubsidy")} value={customerTextValue(customer.estimatedSubsidyKw, ctx("notEntered"))} />
+          </InfoGrid>
+        </ModalSection>
 
-          <section className="tg-customer-view-card">
-            <div className="tg-customer-view-card-title">{ctx("financeData")}</div>
-            <div className="tg-customer-view-meta">
-              <div className="tg-customer-view-row"><span>{ctx("paymentType")}</span><strong>{customerTextValue(customer.paymentTypeLabel)}</strong></div>
-              <div className="tg-customer-view-row"><span>{ctx("deposit")}</span><strong>{fmtUZS(customer.totalSpent)}</strong></div>
-              <div className="tg-customer-view-row"><span>{ctx("subsidyAmount")}</span><strong>{fmtUZS(customer.subsidyAmount)}</strong></div>
-              <div className="tg-customer-view-row"><span>{ctx("contractId")}</span><strong>{customerTextValue(customer.contractId)}</strong></div>
-              <div className="tg-customer-view-row"><span>{ctx("cardNumber")}</span><strong>{customerTextValue(customer.cardNumber)}</strong></div>
-              <div className="tg-customer-view-row"><span>{ctx("bankBranchCode")}</span><strong>{customerTextValue(customer.bankBranchCode)}</strong></div>
-              <div className="tg-customer-view-row"><span>{ctx("bankAccountNumber")}</span><strong>{customerTextValue(customer.bankAccountNumber)}</strong></div>
-            </div>
-          </section>
+        <ModalSection title={ctx("financeData")} icon={<I.wallet size={15} />} tone="green">
+          <InfoGrid>
+            <InfoRow label={ctx("paymentType")} value={customerTextValue(customer.paymentTypeLabel)} />
+            <InfoRow label={ctx("deposit")} value={fmtUZS(customer.totalSpent)} />
+            <InfoRow label={ctx("subsidyAmount")} value={fmtUZS(customer.subsidyAmount)} />
+            <InfoRow label={ctx("contractId")} value={customerTextValue(customer.contractId)} />
+            <InfoRow mono label={ctx("cardNumber")} value={customerTextValue(customer.cardNumber)} />
+            <InfoRow mono label={ctx("bankBranchCode")} value={customerTextValue(customer.bankBranchCode)} />
+            <InfoRow mono full label={ctx("bankAccountNumber")} value={customerTextValue(customer.bankAccountNumber)} />
+          </InfoGrid>
+        </ModalSection>
 
-          <section className="tg-customer-view-card">
-            <div className="tg-customer-view-card-title">{ctx("officialData")}</div>
-            <div className="tg-customer-view-meta">
-              <div className="tg-customer-view-row"><span>PNFL</span><strong>{customerTextValue(customer.pnfl)}</strong></div>
-              <div className="tg-customer-view-row"><span>{ctx("cadastreField")}</span><strong>{customerTextValue(customer.cadastre)}</strong></div>
-              <div className="tg-customer-view-row"><span>{ctx("auditorCompany")}</span><strong>{customerTextValue(customer.auditorCompanyName)}</strong></div>
-              <div className="tg-customer-view-row"><span>{ctx("auditorPhone")}</span><strong>{customerTextValue(customer.auditorCompanyPhone)}</strong></div>
-              <div className="tg-customer-view-row"><span>{ctx("hokimHelper")}</span><strong>{customerTextValue(customer.hokimHelperName)}</strong></div>
-              <div className="tg-customer-view-row"><span>{ctx("helperPhone")}</span><strong>{customerTextValue(customer.hokimHelperPhone)}</strong></div>
-            </div>
-          </section>
-        </div>
+        <ModalSection title={ctx("officialData")} icon={<I.doc size={15} />} tone="violet">
+          <InfoGrid>
+            <InfoRow mono label="PNFL" value={customerTextValue(customer.pnfl)} />
+            <InfoRow label={ctx("cadastreField")} value={customerTextValue(customer.cadastre)} />
+            <InfoRow label={ctx("auditorCompany")} value={customerTextValue(customer.auditorCompanyName)} />
+            <InfoRow label={ctx("auditorPhone")} value={customerTextValue(customer.auditorCompanyPhone)} />
+            <InfoRow label={ctx("hokimHelper")} value={customerTextValue(customer.hokimHelperName)} />
+            <InfoRow label={ctx("helperPhone")} value={customerTextValue(customer.hokimHelperPhone)} />
+          </InfoGrid>
+        </ModalSection>
 
-        <div className="tg-customer-view-grid">
-          <section className="tg-customer-view-card">
-            <div className="tg-customer-view-card-title">{ctx("aiSummary")}</div>
-            <div className="tg-customer-view-note">{customer.aiXulosa || ctx("notEntered")}</div>
-          </section>
-          <section className="tg-customer-view-card">
-            <div className="tg-customer-view-card-title">{ctx("note")}</div>
-            <div className="tg-customer-view-note">{customer.notes || ctx("noNotes")}</div>
-          </section>
-        </div>
+        <ModalSection title={ctx("aiSummary")} icon={<I.sparkle size={15} />} tone="cyan">
+          <div className="tg-customer-view-note">{customer.aiXulosa || ctx("notEntered")}</div>
+        </ModalSection>
+        <ModalSection title={ctx("note")} icon={<I.edit size={15} />} tone="amber">
+          <div className="tg-customer-view-note">{customer.notes || ctx("noNotes")}</div>
+        </ModalSection>
       </div>
     </Modal>
   );
@@ -973,7 +964,7 @@ function CustomerFormModal({ open, onClose, onSave, initial, locations }) {
   const sourceOptions = Array.from(new Set([...(window.SOURCES || []), initial?.source || "manual"].filter(Boolean))).map((source) => ({ value: source, label: customerSourceLabel(source) }));
   const productOptions = [{ value: "", label: ctx("productNotSelected") }, ...(data.products || []).map((product) => ({ value: product.id, label: product.model || product.name || product.title || product.id }))];
   if (initial?.productId && !productOptions.some((option) => option.value === initial.productId)) {
-    productOptions.push({ value: initial.productId, label: initial.productId });
+    productOptions.push({ value: initial.productId, label: "—" });
   }
   const defaultStatus = (data.clientStatuses || []).find((status) => status.isDefault) || data.clientStatuses?.[0] || null;
   const blank = {
@@ -1047,7 +1038,7 @@ function CustomerFormModal({ open, onClose, onSave, initial, locations }) {
     });
   };
   return (
-    <Modal open={open} onClose={onClose} title={initial ? ctx("edit") + " " + ctx("customer").toLowerCase() : ctx("newCustomer")} icon={<I.user size={18} />} width={820}
+    <Modal open={open} onClose={onClose} title={initial ? ctx("edit") + " " + ctx("customer").toLowerCase() : ctx("newCustomer")} subtitle={initial ? customerTextValue(initial.fullName, "") : ctx("primaryDataSub")} icon={initial ? <I.edit size={18} /> : <I.user size={18} />} tone={initial ? customerRowTone(initial) : "accent"} width={820}
       footer={<><Button variant="ghost" onClick={onClose}>{window.TRANSLATIONS?.[customerLang()]?.["common.cancel"] || "Bekor qilish"}</Button><Button variant="primary" onClick={save}>{ctx("save")}</Button></>}>
       <div className="tg-customer-form-shell">
         <section className="tg-customer-form-card">
@@ -1210,7 +1201,7 @@ function CustomerDetailPage({ id }) {
     <div className="page fade-in">
       <PageHeader crumbs={[{ label: "CRM" }, { label: t("page.customers"), to: "/customers" }, { label: c.fullName }]} title={c.fullName}
         actions={customerSession ? <Button variant="ghost" size="sm" icon={<I.message size={14} />} onClick={() => window.navTo("/inbox/" + customerSession.id)}>{ctx("openChat")}</Button> : null} />
-      <Card style={{ marginBottom: 18 }}>
+      <Card {...sideLine(customerRowTone(c), { active: true, style: { marginBottom: 18 } })}>
         <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "center" }}>
           <Avatar name={c.fullName} size={62} />
           <div style={{ flex: 1, minWidth: 220 }}>

@@ -2,6 +2,7 @@
 const { useState: coS, useMemo: coM, useEffect: coE } = React;
 const COMMERCE_UI = {
   uz: {
+    secMain: "Asosiy ma'lumotlar", secLocation: "Joylashuv", secFinance: "Moliya", secNotes: "Izoh va eslatma", secRecord: "Yozuv tafsilotlari",
     overdue: "Muddati o'tgan", withDebt: "Qoldiq bor", closed: "Yopilgan",
     credit: "Kredit", cash: "Naqd",
     totalDebtKpi: "Jami qarzdorlik", creditCustomers: "Kredit mijozlar", districts: "Tumanlar",
@@ -61,6 +62,7 @@ const COMMERCE_UI = {
     statusCardsHint: "Status bo'yicha filtrlash uchun kartani bosing",
   },
   ru: {
+    secMain: "Основные данные", secLocation: "Местоположение", secFinance: "Финансы", secNotes: "Заметки и напоминание", secRecord: "Детали записи",
     overdue: "Просрочено", withDebt: "Есть остаток", closed: "Закрыто",
     credit: "Кредит", cash: "Наличные",
     totalDebtKpi: "Общий долг", creditCustomers: "Кредитные клиенты", districts: "Районы",
@@ -120,6 +122,7 @@ const COMMERCE_UI = {
     statusCardsHint: "Нажмите на карточку, чтобы отфильтровать по статусу",
   },
   en: {
+    secMain: "Main details", secLocation: "Location", secFinance: "Finance", secNotes: "Notes & reminder", secRecord: "Record details",
     overdue: "Overdue", withDebt: "Has balance", closed: "Closed",
     credit: "Credit", cash: "Cash",
     totalDebtKpi: "Total debt", creditCustomers: "Credit customers", districts: "Districts",
@@ -208,6 +211,16 @@ const debtorStatusLabel = (value) => comTx(DEBTOR_STATUS_META[value]?.key || "st
 const debtorStatusColor = (value) => DEBTOR_STATUS_META[value]?.color || "slate";
 const debtorStatusOptions = () => Object.keys(DEBTOR_STATUS_META).map((value) => ({ value, label: debtorStatusLabel(value) }));
 
+// Side-line tone for a debtor: legal status first (sud/mib), then debt state (overdue / with debt / closed)
+const debtorTone = (o) => {
+  const st = debtorStatusOf(o);
+  if (st !== "active") return debtorStatusColor(st);
+  const ov = Number(o?.overdueAmountUzs) || 0;
+  const rem = Number(o?.remainingDebtUzs) || 0;
+  return ov > 0 ? "red" : rem > 0 ? "amber" : "green";
+};
+const paymentTone = (p) => p?.direction === "income" ? "green" : "red";
+
 function DebtorStatusBadge({ value, size = "sm" }) {
   return <Badge color={debtorStatusColor(value)} size={size}>{debtorStatusLabel(value)}</Badge>;
 }
@@ -280,9 +293,9 @@ function OrderRow({ o, onClick }) {
   const metaParts = [o.businessLine, o.paymentType === "credit" ? comTx("credit") : comTx("cash"), fmtDate(o.createdAt)].filter(Boolean);
   const subMetaParts = [locationText, o.deliveryAddress].filter(Boolean);
   return (
-    <Card hover onClick={onClick}>
+    <Card hover onClick={onClick} {...sideLine(debtorTone(o))}>
       <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
-        <span className="tg-card-icon" style={{ color: "var(--amber)", background: "var(--amber-bg)" }}><I.wallet size={17} /></span>
+        <span className="tg-card-icon" style={{ color: toneColor(debtorTone(o)), background: `color-mix(in srgb, ${toneColor(debtorTone(o))} 13%, transparent)` }}><I.wallet size={17} /></span>
         <div style={{ flex: 1, minWidth: 160 }}>
           <div className="tg-cell-strong">{o.customerName}</div>
           <div className="tg-cell-sub">{o.businessLine} • {o.paymentType === "credit" ? comTx("credit") : comTx("cash")} • {fmtDate(o.createdAt)}</div>
@@ -315,9 +328,9 @@ OrderRow = function OrderRowPatched({ o, onClick, onEdit, onDelete, onAddPayment
     return { color: isPast ? "red" : isToday ? "amber" : "blue", label: isPast ? comTx("recallOverdue") : isToday ? comTx("recallToday") : comTx("recallSet"), time: fmtRecallDate(o.recallAt, true) };
   })();
   return (
-    <Card hover onClick={onClick}>
+    <Card hover onClick={onClick} {...sideLine(debtorTone(o))}>
       <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
-        <span className="tg-card-icon" style={{ color: "var(--amber)", background: "var(--amber-bg)" }}><I.wallet size={17} /></span>
+        <span className="tg-card-icon" style={{ color: toneColor(debtorTone(o)), background: `color-mix(in srgb, ${toneColor(debtorTone(o))} 13%, transparent)` }}><I.wallet size={17} /></span>
         <div style={{ flex: 1, minWidth: 160 }}>
           <div className="tg-cell-strong">{o.customerName}{o.sourceNumber != null && <span style={{ marginLeft: 6, fontSize: 12, fontWeight: 600, color: "var(--text-3)" }}>#{o.sourceNumber}</span>}</div>
           <div className="tg-cell-sub">{metaParts.join(" • ")}</div>
@@ -607,7 +620,7 @@ function OrdersPage() {
           <DataTable
             columns={[
               { key: "sourceNum", label: comTx("colSourceNum"), sortVal: (row) => row.sourceNumber ?? Infinity, render: (row) => row.sourceNumber != null ? <span style={{ fontWeight: 700, color: "var(--text-2)" }}>#{row.sourceNumber}</span> : <span className="tg-cell-sub">—</span> },
-              { key: "name", label: comTx("colCustomer"), sortVal: (row) => row.customerName, render: (row) => <div><div className="tg-cell-strong">{row.customerName}</div><div className="tg-cell-sub">{row.phone || row.id}</div></div> },
+              { key: "name", label: comTx("colCustomer"), sortVal: (row) => row.customerName, render: (row) => <div><div className="tg-cell-strong">{row.customerName}</div><div className="tg-cell-sub">{row.phone || "—"}</div></div> },
               { key: "district", label: comTx("colDistrict"), sortVal: (row) => orderTuman(row), render: (row) => orderTuman(row) || <span className="tg-cell-sub">—</span> },
               { key: "mahalla", label: comTx("colMahalla"), sortVal: (row) => orderMahalla(row), render: (row) => orderMahalla(row) || <span className="tg-cell-sub">—</span> },
               { key: "type", label: comTx("filterDebtorType"), sortVal: (row) => row.debtorType || "", render: (row) => (row.debtorType === "solar_business" || row.debtorType === "solar_panel") ? <Badge color="blue" size="sm">{comTx("solar")}</Badge> : row.debtorType === "moto_business" ? <Badge color="amber" size="sm">{comTx("oldBiz")}</Badge> : <span className="tg-cell-sub">—</span> },
@@ -616,6 +629,7 @@ function OrdersPage() {
               { key: "debt", label: comTx("colDebt"), sortVal: (row) => debtNum(row.remainingDebtUzs), render: (row) => <span style={{ fontWeight: 700 }}>{rawDebt(row.remainingDebtUzs) ?? "—"}</span> },
             ]}
             rows={listRows}
+            rowTone={debtorTone}
             onRowClick={(row) => nav("/debtors/" + row.id)}
             defaultSort={{ key: "debt", dir: "desc" }}
           />
@@ -820,7 +834,9 @@ function OrderFormModal({ open, onClose, onSave, initial, locations }) {
   };
 
   return (
-    <Modal open={open} onClose={onClose} title={initial ? comTx("debtorFormEdit") : comTx("debtorFormNew")} icon={initial ? <I.edit size={18} /> : <I.plus size={18} />} width={620}
+    <Modal open={open} onClose={onClose} title={initial ? comTx("debtorFormEdit") : comTx("debtorFormNew")} subtitle={initial ? [initial.customerName, initial.phone].filter(Boolean).join(" · ") : undefined}
+      badge={initial ? <DebtorStatusBadge value={debtorStatusOf(form)} /> : undefined} tone={initial ? debtorTone({ ...initial, debtorStatus: debtorStatusOf(form) }) : "accent"}
+      icon={initial ? <I.edit size={18} /> : <I.plus size={18} />} width={680}
       footer={<>
         <Button variant="ghost" onClick={onClose}>{comTx("cancel")}</Button>
         <Button variant="primary" onClick={async () => {
@@ -867,14 +883,12 @@ function OrderFormModal({ open, onClose, onSave, initial, locations }) {
           });
         }}>{initial ? comTx("save") : comTx("create")}</Button>
       </>}>
-      <div style={{ display: "grid", gap: 14 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 120px", gap: 14 }}>
+      <ModalSection title={comTx("secMain")} icon={<I.user size={15} />} tone="accent">
+        <div className="tg-fgrid">
           <Field label={comTx("debtorLabel")}><Input value={form.customerName} onChange={e => set("customerName", e.target.value)} /></Field>
           <Field label={comTx("phoneLabel")} required><Input value={form.phone || ""} onChange={e => set("phone", e.target.value)} placeholder="+998 90 123 45 67" /></Field>
           <Field label={comTx("colDistrict")}><Input value={form.district} onChange={e => { set("district", e.target.value); set("mahalla", ""); }} placeholder={comTx("districtPh")} /></Field>
           <Field label={comTx("colSourceNum")}><Input type="number" value={form.sourceNumber ?? ""} onChange={e => set("sourceNumber", e.target.value)} placeholder="#" /></Field>
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 14 }}>
           <Field label={comTx("colMahalla")}><Input value={form.mahalla} onChange={e => set("mahalla", e.target.value)} placeholder={comTx("mahallaPh")} /></Field>
           <Field label={comTx("direction")}><Select value={form.businessLine} onChange={v => set("businessLine", v)} options={[{ value: "Quyosh panel biznesi", label: comTx("solar") }, { value: "Moto biznes", label: comTx("oldBiz") }]} /></Field>
           <Field label={comTx("paymentType")}><Select value={form.paymentType} onChange={v => set("paymentType", v)} options={[{ value: "credit", label: comTx("credit") }, { value: "cash", label: comTx("cash") }]} /></Field>
@@ -882,6 +896,8 @@ function OrderFormModal({ open, onClose, onSave, initial, locations }) {
             <Select value={debtorStatusOf(form)} onChange={v => set("debtorStatus", v)} options={debtorStatusOptions()} />
           </Field>
         </div>
+      </ModalSection>
+      {(!!districts.length || isNewDistrict || !!form.district) && <ModalSection title={comTx("secLocation")} icon={<I.mapPin size={15} />} tone="blue">
         {(!!districts.length || isNewDistrict) && (
           <div style={{ display: "grid", gap: 8 }}>
             <div style={{ fontSize: 12, color: "var(--text-3)" }}>{comTx("availableDistricts")}</div>
@@ -982,11 +998,15 @@ function OrderFormModal({ open, onClose, onSave, initial, locations }) {
             </div>
           </div>
           ); })()}
-        <div style={{ display: "grid", gridTemplateColumns: initial ? "1fr 1fr" : "1fr 1fr 1fr", gap: 14 }}>
+      </ModalSection>}
+      <ModalSection title={comTx("secFinance")} icon={<I.wallet size={15} />} tone="green">
+        <div className="tg-fgrid">
           <Field label={comTx("totalAmount")}><Input type="number" value={form.totalUzs} onChange={e => set("totalUzs", e.target.value)} /></Field>
           {!initial && <Field label={comTx("openingPaid")}><Input type="number" value={form.paidUzs} onChange={e => set("paidUzs", e.target.value)} placeholder="0" /></Field>}
           <Field label={comTx("deadline")}><DatePickerInput value={(form.dueDate || "").slice(0, 10)} onChange={(value) => set("dueDate", value)} /></Field>
         </div>
+      </ModalSection>
+      <ModalSection title={comTx("secNotes")} icon={<I.note size={15} />} tone="amber">
         <Field label={comTx("note")}><Textarea rows={4} value={form.note || ""} onChange={e => set("note", e.target.value)} placeholder={comTx("notePlaceholder")} /></Field>
         <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 10, alignItems: "end" }}>
           <Field label={comTx("recallAt")}>
@@ -994,7 +1014,7 @@ function OrderFormModal({ open, onClose, onSave, initial, locations }) {
           </Field>
           {form.recallAt && <Button variant="ghost" size="sm" onClick={() => set("recallAt", null)} style={{ marginBottom: 2 }}>{comTx("clearRecall")}</Button>}
         </div>
-      </div>
+      </ModalSection>
     </Modal>
   );
 }
@@ -1009,8 +1029,10 @@ function DebtorPaymentModal({ open, onClose, onSave, initial }) {
   return (
     <Modal open={open} onClose={onClose}
       title={initial?.id ? comTx("editPaymentEntry") : comTx("addPayment")}
-      icon={initial?.id ? <I.edit size={18} /> : <I.plus size={18} />}
-      width={420}
+      subtitle={initial?.id && initial.paid_on ? fmtDate(initial.paid_on) : undefined}
+      icon={initial?.id ? <I.edit size={18} /> : <I.wallet size={18} />}
+      tone="green"
+      width={440}
       footer={<>
         <Button variant="ghost" onClick={onClose}>{comTx("cancel")}</Button>
         <Button variant="primary" disabled={saving} onClick={async () => {
@@ -1021,11 +1043,11 @@ function DebtorPaymentModal({ open, onClose, onSave, initial }) {
           finally { setSaving(false); }
         }}>{initial?.id ? comTx("save") : comTx("create")}</Button>
       </>}>
-      <div style={{ display: "grid", gap: 14 }}>
+      <ModalSection title={comTx("secRecord")} icon={<I.wallet size={15} />} tone="green">
         <Field label={comTx("amountCol")} required><Input type="number" value={form.amount} onChange={e => set("amount", e.target.value)} placeholder="Masalan: 200000" /></Field>
         <Field label={comTx("dateCol")} required><DatePickerInput value={(form.paid_on || "").slice(0, 10)} onChange={v => set("paid_on", v)} /></Field>
         <Field label={comTx("methodCol")}><Textarea rows={2} value={form.notes || ""} onChange={e => set("notes", e.target.value)} placeholder={comTx("notePlaceholder")} /></Field>
-      </div>
+      </ModalSection>
     </Modal>
   );
 }
@@ -1317,7 +1339,7 @@ function OrderDetailPage({ id }) {
                 <thead><tr><th>{comTx("dateCol")}</th><th>{comTx("amountCol")}</th><th>{comTx("methodCol")}</th><th>{comTx("addedBy")}</th><th>{comTx("createdAtCol")}</th><th style={{ width: 72 }}></th></tr></thead>
                 <tbody>
                   {payments.length ? payments.map(p => (
-                    <tr key={p.id}>
+                    <tr key={p.id} data-tone="1" style={{ "--sl": "var(--green)" }}>
                       <td>{fmtDate(p.paid_on)}</td>
                       <td style={{ fontWeight: 700, color: "var(--green)" }}>{fmtUZS(apiParseNumber(p.amount))}</td>
                       <td>{p.notes || "—"}</td>
@@ -1542,7 +1564,7 @@ function PaymentsPage() {
       <Card pad={false}>
         {tableRows.length === 0 ? (
           <EmptyState icon={<I.doc size={26} />} title={(dateFrom || dateTo) ? comTx("noDateData") : comTx("emptyPayments")} />
-        ) : <DataTable columns={columns} rows={tablePageRows} onRowClick={r => setViewPayment(r)} defaultSort={{ key: "date", dir: "desc" }} />}
+        ) : <DataTable columns={columns} rows={tablePageRows} onRowClick={r => setViewPayment(r)} defaultSort={{ key: "date", dir: "desc" }} rowTone={paymentTone} />}
         {tableRows.length > PAY_PAGE_SIZE && <PaginationBar page={tablePage} total={tableRows.length} pageSize={PAY_PAGE_SIZE} onChange={setTablePage} />}
       </Card>
       <PaymentViewModal
@@ -1590,24 +1612,33 @@ function PaymentsPage() {
 }
 window.PaymentsPage = PaymentsPage;
 
-function PaymentViewModal({ open, onClose, onEdit, onDelete, payment }) {
+function PaymentViewModal({ open, onClose, onEdit, onDelete, payment: paymentProp }) {
+  const payment = useLastValue(paymentProp);
   if (!payment) return null;
   return (
-    <Modal open={open} onClose={onClose} title={comTx("paymentViewTitle")} icon={<I.chart size={18} />} width={480}
+    <Modal open={open} onClose={onClose} title={payment.customerName || comTx("paymentViewTitle")} subtitle={[comTx("paymentViewTitle"), fmtDate(payment.date)].join(" · ")}
+      badge={<Badge color={paymentTone(payment)} size="sm">{payment.direction === "income" ? comTx("income") : comTx("expense")}</Badge>}
+      tone={paymentTone(payment)} icon={<I.chart size={18} />} width={500}
       footer={<>
         {onEdit && <Button variant="ghost" icon={<I.edit size={15} />} onClick={onEdit}>{comTx("edit")}</Button>}
         {onDelete && <Button variant="danger" icon={<I.trash size={15} />} onClick={onDelete}>{comTx("delete")}</Button>}
         <Button variant="primary" onClick={onClose}>{comTx("close")}</Button>
       </>}>
-      <div className="tg-meta">
-        <div className="tg-meta-row"><span className="tg-meta-k">{comTx("dateCol")}</span><span className="tg-meta-v">{fmtDate(payment.date)}</span></div>
-        <div className="tg-meta-row"><span className="tg-meta-k">{comTx("direction")}</span><span className="tg-meta-v">{payment.direction === "income" ? comTx("income") : comTx("expense")}</span></div>
-        <div className="tg-meta-row"><span className="tg-meta-k">{comTx("category")}</span><span className="tg-meta-v">{payment.category}</span></div>
-        <div className="tg-meta-row"><span className="tg-meta-k">{comTx("subject")}</span><span className="tg-meta-v">{payment.customerName}</span></div>
-        <div className="tg-meta-row"><span className="tg-meta-k">{comTx("amountCol")}</span><span className="tg-meta-v">{fmtPaymentAmount(payment)}</span></div>
-        <div className="tg-meta-row"><span className="tg-meta-k">{comTx("currency")}</span><span className="tg-meta-v">{payment.currency || payment.method || "UZS"}</span></div>
-        <div className="tg-meta-row"><span className="tg-meta-k">{comTx("sortOrder")}</span><span className="tg-meta-v">{payment.sortOrder || 0}</span></div>
+      <div {...sideLine(paymentTone(payment), { active: true, className: "tg-amount-hero" })}>
+        <span>{comTx("amountCol")}</span>
+        <strong style={{ color: toneColor(paymentTone(payment)) }}>{fmtPaymentAmount(payment)}</strong>
       </div>
+      <ModalSection title={comTx("secRecord")} icon={<I.doc size={15} />} tone={paymentTone(payment)}>
+        <InfoGrid>
+          <InfoRow label={comTx("dateCol")} value={fmtDate(payment.date)} />
+          <InfoRow tone={paymentTone(payment)} label={comTx("direction")} value={payment.direction === "income" ? comTx("income") : comTx("expense")} />
+          <InfoRow label={comTx("category")} value={payment.category} />
+          <InfoRow label={comTx("subject")} value={payment.customerName} />
+          <InfoRow label={comTx("currency")} value={payment.currency || payment.method || "UZS"} />
+          <InfoRow label={comTx("sortOrder")} value={payment.sortOrder || 0} />
+          {!!payment.note && <InfoRow full label={comTx("note")} value={payment.note} />}
+        </InfoGrid>
+      </ModalSection>
     </Modal>
   );
 }
@@ -1618,7 +1649,8 @@ function PaymentFormModal({ open, onClose, onSave, initial }) {
   React.useEffect(() => { setForm(initial || blank); }, [initial, open]);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
   return (
-    <Modal open={open} onClose={onClose} title={initial ? comTx("paymentFormEdit") : comTx("paymentFormNew")} icon={initial ? <I.edit size={18} /> : <I.plus size={18} />} width={520}
+    <Modal open={open} onClose={onClose} title={initial ? comTx("paymentFormEdit") : comTx("paymentFormNew")} subtitle={initial ? [initial.customerName, fmtDate(initial.date)].filter(Boolean).join(" · ") : undefined}
+      tone={String(form.rawCategory || "").includes("income") ? "green" : "red"} icon={initial ? <I.edit size={18} /> : <I.plus size={18} />} width={540}
       footer={<><Button variant="ghost" onClick={onClose}>{comTx("cancel")}</Button><Button variant="primary" onClick={async () => {
         const selectedCategory = ACCOUNTING_CATEGORY_OPTIONS.find((option) => option.value === form.rawCategory);
         await onSave({
@@ -1628,8 +1660,8 @@ function PaymentFormModal({ open, onClose, onSave, initial }) {
           rawCategory: form.rawCategory,
         });
       }}>{comTx("save")}</Button></>}>
-      <div style={{ display: "grid", gap: 14 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+      <ModalSection title={comTx("secRecord")} icon={<I.doc size={15} />} tone={String(form.rawCategory || "").includes("income") ? "green" : "red"}>
+        <div className="tg-fgrid">
           <Field label={comTx("dateCol")}><DatePickerInput value={(form.date || "").slice(0, 10)} onChange={(value) => set("date", value)} /></Field>
           <Field label={comTx("category")}><Select value={form.rawCategory} onChange={v => {
             const selected = ACCOUNTING_CATEGORY_OPTIONS.find((option) => option.value === v);
@@ -1642,13 +1674,15 @@ function PaymentFormModal({ open, onClose, onSave, initial }) {
           }} options={ACCOUNTING_CATEGORY_OPTIONS} /></Field>
         </div>
         <Field label={comTx("subject")}><Input value={form.customerName} onChange={e => set("customerName", e.target.value)} /></Field>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+      </ModalSection>
+      <ModalSection title={comTx("secFinance")} icon={<I.wallet size={15} />} tone="blue">
+        <div className="tg-fgrid">
           <Field label={comTx("amountCol")}><Input type="number" value={form.amountUzs} onChange={e => set("amountUzs", e.target.value)} /></Field>
           <Field label={comTx("currency")}><Input value={form.currency || form.method || ""} onChange={e => set("currency", e.target.value)} placeholder={comTx("currencyPh")} /></Field>
         </div>
         <Field label={comTx("sortOrder")}><Input type="number" value={form.sortOrder || 0} onChange={e => set("sortOrder", +e.target.value || 0)} /></Field>
         <Field label={comTx("note")}><Textarea rows={3} value={form.note || ""} onChange={e => set("note", e.target.value)} /></Field>
-      </div>
+      </ModalSection>
     </Modal>
   );
 }

@@ -147,7 +147,7 @@ function LeadDetailPage({ id }) {
     <div className="page fade-in">
       <PageHeader crumbs={[{ label: ldtTx("crmCrumb") }, { label: t("page.leads"), to: "/leads" }, { label: lead.fullName }]} title={lead.fullName} />
 
-      <Card style={{ marginBottom: 18 }}>
+      <Card {...sideLine(statusTone(lead.pipelineStage), { active: true, style: { marginBottom: 18 } })}>
         <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "center" }}>
           <Avatar name={lead.fullName} size={62} />
           <div style={{ flex: 1, minWidth: 220 }}>
@@ -201,7 +201,7 @@ function LeadDetailPage({ id }) {
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {(lead.notes || []).length === 0 && <div className="tg-cell-sub">{ldtTx("noNotes")}</div>}
-                {(lead.notes || []).map((n, i) => <div key={i} style={{ padding: "10px 12px", background: "var(--surface-2)", borderRadius: 9, fontSize: 13, borderLeft: "2px solid var(--accent)" }}>{n}</div>)}
+                {(lead.notes || []).map((n, i) => <div key={i} {...sideLine("amber", { className: "side-line-sm", style: { padding: "10px 12px 10px 15px", background: "var(--surface-2)", borderRadius: 9, fontSize: 13 } })}>{n}</div>)}
               </div>
             </Panel>
           </div>
@@ -291,6 +291,12 @@ function LeadProducts({ products }) {
   );
 }
 
+const LEAD_TASK_STATUS_LABEL = {
+  uz: { pending: "Kutilmoqda", done: "Bajarilgan", overdue: "Muddati o'tgan" },
+  ru: { pending: "В ожидании", done: "Выполнено", overdue: "Просрочено" },
+  en: { pending: "Pending", done: "Done", overdue: "Overdue" },
+};
+
 function LeadTasks({ tasks, onAdd }) {
   const { update, toast } = useApp();
   return (
@@ -298,10 +304,10 @@ function LeadTasks({ tasks, onAdd }) {
       {!tasks.length ? <EmptyState title={ldtTx("noTasks")} /> : (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {tasks.map(tk => (
-            <div key={tk.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 0", borderBottom: "1px solid var(--border-soft)" }}>
+            <div key={tk.id} {...sideLine(statusTone(tk.status), { active: tk.status !== "done", className: "side-line-sm", style: { display: "flex", alignItems: "center", gap: 12, padding: "10px 12px 10px 16px", borderRadius: 10, border: "1px solid var(--border-soft)", background: "var(--surface-2)" } })}>
               <span className="tg-check" data-on={tk.status === "done" ? "1" : undefined} onClick={() => { update("tasks", ts => ts.map(x => x.id === tk.id ? { ...x, status: x.status === "done" ? "pending" : "done" } : x)); toast(ldtTx("taskUpdated")); }}>{tk.status === "done" && <I.check size={12} stroke={3} />}</span>
               <div style={{ flex: 1 }}><div style={{ fontWeight: 540 }}>{tk.title}</div><div className="tg-cell-sub">{fmtDate(tk.dueDate, true)}</div></div>
-              <Badge color={STATUS_COLORS[tk.status]} size="sm">{tk.status}</Badge>
+              <Badge color={STATUS_COLORS[tk.status]} size="sm">{LEAD_TASK_STATUS_LABEL[window.__TG_LANG || "uz"]?.[tk.status] || LEAD_TASK_STATUS_LABEL.uz[tk.status] || "—"}</Badge>
             </div>
           ))}
         </div>

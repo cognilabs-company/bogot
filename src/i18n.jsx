@@ -1,6 +1,7 @@
 /* i18n.jsx - basic translations */
 const TRANSLATIONS = {
   uz: {
+    "sec.main": "Asosiy ma'lumotlar", "sec.details": "Tafsilotlar", "sec.planning": "Rejalashtirish", "sec.description": "Tavsif", "sec.appearance": "Ko'rinish", "sec.settings": "Sozlamalar", "sec.access": "Kirish va ruxsatlar", "sec.contact": "Aloqa", "sec.pricing": "Narx va miqdor", "sec.media": "Rasmlar", "sec.stock": "Ombor", "sec.notes": "Izoh", "sec.connection": "Ulanish",
     "nav.overview": "Umumiy",
     "nav.crm": "CRM",
     "nav.channels": "Kanallar",
@@ -264,6 +265,7 @@ const TRANSLATIONS = {
     "auth.loginError": "Login yoki parol noto'g'ri",
   },
   ru: {
+    "sec.main": "Основные данные", "sec.details": "Детали", "sec.planning": "Планирование", "sec.description": "Описание", "sec.appearance": "Внешний вид", "sec.settings": "Настройки", "sec.access": "Доступ и права", "sec.contact": "Контакты", "sec.pricing": "Цена и количество", "sec.media": "Изображения", "sec.stock": "Склад", "sec.notes": "Заметка", "sec.connection": "Подключение",
     "nav.overview": "Обзор",
     "nav.crm": "CRM",
     "nav.channels": "Каналы",
@@ -527,6 +529,7 @@ const TRANSLATIONS = {
     "auth.loginError": "Неверный логин или пароль",
   },
   en: {
+    "sec.main": "Main details", "sec.details": "Details", "sec.planning": "Planning", "sec.description": "Description", "sec.appearance": "Appearance", "sec.settings": "Settings", "sec.access": "Access & permissions", "sec.contact": "Contact", "sec.pricing": "Price & quantity", "sec.media": "Images", "sec.stock": "Stock", "sec.notes": "Note", "sec.connection": "Connection",
     "nav.overview": "Overview",
     "nav.crm": "CRM",
     "nav.channels": "Channels",

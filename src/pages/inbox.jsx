@@ -254,7 +254,7 @@ function InboxPage({ initialSessionId }) {
             const ChIco = I[CH_ICON[conversation.channel] || "message"];
             const isHandoff = conversation.status === "handoff" || conversation.aiMode === "handoff";
             return (
-              <div key={conversation.id} className="tg-inbox-conv-item" data-active={active?.id === conversation.id ? "1" : undefined} onClick={() => setActiveId(conversation.id)} style={isHandoff ? { borderLeft: "3px solid var(--amber)", background: active?.id === conversation.id ? undefined : "var(--amber-bg)" } : undefined}>
+              <div key={conversation.id} {...sideLine(isHandoff ? "amber" : (CH_COLOR[conversation.channel] || "neutral"), { active: active?.id === conversation.id, className: "tg-inbox-conv-item" + (isHandoff ? " is-handoff" : "") })} onClick={() => setActiveId(conversation.id)}>
                 <div style={{ position: "relative" }}>
                   <Avatar name={conversation.name} size={38} />
                   <span style={{ position: "absolute", bottom: -2, right: -2, width: 16, height: 16, background: `var(--${CH_COLOR[conversation.channel] || "slate"})`, borderRadius: 4, display: "grid", placeItems: "center", border: "2px solid var(--surface)" }}>
@@ -398,7 +398,7 @@ function InboxPage({ initialSessionId }) {
         }}
         title={ibTx("deleteChatTitle")}
         message={ibTx("deleteChatMsg").replace("{0}", deleteTarget?.name || "")}
-        details={deleteTarget ? `Kanal: ${deleteTarget.channel || "-"}\nHolat: ${deleteTarget.status || "open"}\nPlatform user: ${deleteTarget.platformUserId || "-"}` : ""}
+        details={deleteTarget ? `Kanal: ${(window.SOURCE_UZ && window.SOURCE_UZ[deleteTarget.channel]) || deleteTarget.channel || "-"}` : ""}
         confirmLabel={deleteBusy ? ibTx("deleting") : ibTx("deleteConfirm")}
         danger
       />
@@ -406,14 +406,16 @@ function InboxPage({ initialSessionId }) {
         open={pauseOpen}
         onClose={() => { if (!pauseBusy) setPauseOpen(false); }}
         title={ibTx("pauseModalTitle")}
+        subtitle={active?.name || undefined}
         icon={<I.pause size={18} />}
+        tone="amber"
         width={440}
         footer={<>
           <Button variant="ghost" onClick={() => setPauseOpen(false)} disabled={pauseBusy}>{ibTx("cancel")}</Button>
           <Button variant="primary" onClick={submitPause} disabled={pauseBusy}>{pauseBusy ? ibTx("pauseSaving") : ibTx("pauseConfirm")}</Button>
         </>}
       >
-        <div style={{ display: "grid", gap: 14 }}>
+        <ModalSection title={ibTx("pauseUntilLabel")} icon={<I.clock size={15} />} tone="amber">
           <Field label={ibTx("pauseUntilLabel")}>
             <DatePickerInput value={pauseValue} onChange={setPauseValue} mode="datetime" />
           </Field>
@@ -422,7 +424,7 @@ function InboxPage({ initialSessionId }) {
               <Button key={minutes} variant="ghost" size="sm" onClick={() => quickPause(minutes)}>{minutes} {ibTx("minuteSuffix")}</Button>
             ))}
           </div>
-        </div>
+        </ModalSection>
       </Modal>
     </div>
   );

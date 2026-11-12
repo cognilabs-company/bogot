@@ -451,7 +451,7 @@ function DashboardPage() {
         <Panel title={dashTx("panelOverdue")} subtitle={dashTx("panelOverdueSub")} icon="wallet" color="red">
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             {overdueDebtors.map((debtor) => (
-              <div key={debtor.id} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }} onClick={() => nav("/debtors/" + debtor.id)}>
+              <div key={debtor.id} {...sideLine("red", { lift: true, className: "tg-list-item side-line-sm" })} onClick={() => nav("/debtors/" + debtor.id)}>
                 <Avatar name={debtor.customerName} size={32} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div className="tg-cell-strong">{debtor.customerName}</div>
@@ -468,7 +468,7 @@ function DashboardPage() {
             {upcomingTasks.map((task) => {
               const user = data.users.find((row) => row.id === task.assignedUserId);
               return (
-                <div key={task.id} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }} onClick={() => nav("/tasks")}>
+                <div key={task.id} {...sideLine(new Date(task.dueDate).getTime() < Date.now() ? "red" : (taskColumnsById[task.columnId]?.color || "blue"), { lift: true, className: "tg-list-item side-line-sm" })} onClick={() => nav("/tasks")}>
                     <Badge color={new Date(task.dueDate).getTime() < Date.now() ? "red" : "blue"} size="sm">
                       {taskColumnsById[task.columnId]?.name || dashTx("taskFallback")}
                     </Badge>
@@ -491,7 +491,7 @@ function DashboardPage() {
               <thead><tr><th>{dashTx("colCustomer")}</th><th>{dashTx("colPhone")}</th><th>{dashTx("colStatus")}</th><th>{dashTx("colSubsidy")}</th></tr></thead>
               <tbody>
                 {latestCustomers.map((customer) => (
-                  <tr key={customer.id} data-clickable="1" onClick={() => nav("/customers/" + customer.id)}>
+                  <tr key={customer.id} data-clickable="1" data-tone="1" style={{ "--sl": toneColor((!customer.statusId && !customer.statusName) ? "neutral" : (customer.statusColor || statusTone(customer.status))) }} onClick={() => nav("/customers/" + customer.id)}>
                     <td><div className="tg-cell-strong">{customer.fullName}</div></td>
                     <td>{customer.phone || "—"}</td>
                     <td>
@@ -516,7 +516,7 @@ function DashboardPage() {
         <Panel title={dashTx("panelProducts")} subtitle={dashTx("panelProductsSub")} icon="box" color="green">
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             {bestProducts.map((product) => (
-              <div key={product.id} style={{ display: "flex", alignItems: "center", gap: 11, cursor: "pointer" }} onClick={() => nav("/products/" + product.id)}>
+              <div key={product.id} {...sideLine((product.stockQuantity || 0) < 5 ? "amber" : "green", { lift: true, className: "tg-list-item side-line-sm" })} onClick={() => nav("/products/" + product.id)}>
                 <ProductPhoto product={product} size="table" />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13, fontWeight: 600 }}>{product.model}</div>

@@ -9,7 +9,7 @@ function Checkbox({ checked, onChange, indeterminate }) {
   );
 }
 
-function DataTable({ columns, rows, rowKey = (r) => r.id, onRowClick, selectable, selected, onSelect, pageSize = 12, emptyState, defaultSort }) {
+function DataTable({ columns, rows, rowKey = (r) => r.id, onRowClick, selectable, selected, onSelect, pageSize = 12, emptyState, defaultSort, rowTone }) {
   const [sort, setSort] = tS(defaultSort || null);
   const [page, setPage] = tS(0);
   const normalizedColumns = tM(() => columns.map((col) => ({
@@ -78,8 +78,10 @@ function DataTable({ columns, rows, rowKey = (r) => r.id, onRowClick, selectable
             {pageRows.map(row => {
               const key = rowKey(row);
               const isSel = selectable && selected.includes(key);
+              const tone = rowTone ? rowTone(row) : null;
               return (
-                <tr key={key} data-clickable={onRowClick ? "1" : undefined} data-selected={isSel ? "1" : undefined} onClick={() => onRowClick && onRowClick(row)}>
+                <tr key={key} data-clickable={onRowClick ? "1" : undefined} data-selected={isSel ? "1" : undefined} data-tone={tone ? "1" : undefined}
+                  style={tone ? { "--sl": toneColor(tone) } : undefined} onClick={() => onRowClick && onRowClick(row)}>
                   {selectable && (
                     <td onClick={e => e.stopPropagation()} data-col-kind="select">
                       <Checkbox checked={isSel} onChange={(v) => onSelect(v ? [...selected, key] : selected.filter(id => id !== key))} />
