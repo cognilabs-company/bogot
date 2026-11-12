@@ -52,6 +52,39 @@
   .tg-wind { transition-duration: .12s; }
   .tg-wind-gust, .tg-wind-streak, .tg-wind-puff { display: none; }
 }
+/* ---- 💨 wind icon: rides the ribbon, sits on the active link's end edge, blowing down ---- */
+/* labels truncate and every expanded item reserves room for the icon, so nothing ever collides with it */
+.tg-nav-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tg-sidebar:not(.collapsed) .tg-nav-item { padding-inline-end: 34px; }
+.tg-nav-badge { flex-shrink: 0; margin-inline-start: auto; }
+.tg-wind-icon { position: absolute; inset-inline-end: 10px; top: calc(var(--wind-ih, 37px) / 2 - 9px); width: 18px; height: 18px; color: var(--accent);
+  transition: opacity .18s var(--ease); }
+/* while flying the icon is pinned to the leading edge, so it arrives first and the ribbon catches up */
+.tg-wind[data-dir="down"] .tg-wind-icon { top: auto; bottom: calc(var(--wind-ih, 37px) / 2 - 9px); }
+.tg-wind-glyph { display: block; overflow: visible; transform-origin: 50% 0%;
+  filter: drop-shadow(0 0 3px rgba(var(--accent-rgb), .28)); }
+.tg-wind[data-dir="up"] .tg-wind-glyph { transform-origin: 50% 100%; }
+.tg-wg-s { stroke-dasharray: 100 60; stroke-dashoffset: 0; }
+.tg-wg-p { stroke-dasharray: 100 16; stroke-dashoffset: 0; }
+.tg-wind-ipuff { position: absolute; left: 50%; top: 50%; width: 30px; height: 30px; border-radius: 50%; opacity: 0; transform: translate(-50%, -50%); pointer-events: none;
+  background: radial-gradient(circle, rgba(var(--accent-rgb), .34) 0%, rgba(var(--accent-rgb), .1) 45%, rgba(var(--accent-rgb), 0) 70%); }
+/* idle (slow, ~2.8s): the whole gust drifts a touch downward */
+.tg-wind:not([data-flying]) .tg-wind-glyph { animation: tg-wind-drift 2.8s ease-in-out infinite; }
+/* streaks stream out downward and redraw from the top; a pocket of air circles round the puff into its swirl */
+.tg-wind:not([data-flying]) .tg-wg-s { animation: tg-wind-stream 2.8s cubic-bezier(.5,0,.35,1) infinite; }
+.tg-wind:not([data-flying]) .tg-wg-s:nth-child(2) { animation-delay: .22s; }
+.tg-wind:not([data-flying]) .tg-wg-s:nth-child(3) { animation-delay: .44s; }
+.tg-wind:not([data-flying]) .tg-wg-p { animation: tg-wind-swirl 2.8s cubic-bezier(.45,.05,.4,1) .5s infinite; }
+@keyframes tg-wind-stream { 0% { stroke-dashoffset: 0; } 46%, 100% { stroke-dashoffset: 160; } }
+@keyframes tg-wind-swirl { 0% { stroke-dashoffset: 0; } 64%, 100% { stroke-dashoffset: 116; } }
+@keyframes tg-wind-drift { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(1.2px); } }
+/* collapsed rail: icon-only items have no room, the ribbon alone marks the link */
+.tg-sidebar.collapsed .tg-wind-icon { opacity: 0; transition-duration: .08s; }
+.tg-sidebar.collapsed .tg-wind-glyph, .tg-sidebar.collapsed .tg-wind-glyph path { animation-play-state: paused; }
+@media (prefers-reduced-motion: reduce) {
+  .tg-wind .tg-wind-glyph, .tg-wind .tg-wind-glyph path { animation: none !important; stroke-dashoffset: 0; }
+  .tg-wind-ipuff { display: none; }
+}
 .tg-sidebar.collapsed .tg-nav-item { justify-content: center; padding: 10px; }
 .tg-sidebar.collapsed .tg-nav-grouptitle { text-align: center; font-size: 0; padding: 4px 0; }
 .tg-sidebar.collapsed .tg-nav-grouptitle::after { content: "•••"; font-size: 9px; letter-spacing: 1px; }
@@ -213,6 +246,11 @@
   border-radius: 3px 3px 0 0;
 }
 [data-layout="topnav"] .tg-wind[data-axis="x"][data-flying="1"] .tg-wind-bar { left: 6px; right: 6px; }
+
+/* horizontal bar is too short for a vertical gust: the bottom accent bar marks the link instead */
+[data-layout="topnav"] .tg-wind-icon { display: none; }
+[data-layout="topnav"] .tg-sidebar .tg-nav-item { padding-inline-end: 11px; }
+[data-layout="topnav"] .tg-nav-label { flex: none; overflow: visible; }
 
 [data-layout="topnav"] .tg-sidebar-foot { display: none; }
 [data-layout="topnav"] .tg-sidebar-backdrop { display: none !important; }

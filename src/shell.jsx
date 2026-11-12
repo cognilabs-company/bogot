@@ -154,6 +154,7 @@ function useWindIndicator(navRef, windRef) {
     // where the accent bar sits: nav's inner left edge (sidebar) / bottom edge (topnav)
     el.style.setProperty("--wind-x", box.x + "px");
     el.style.setProperty("--wind-b", Math.max(0, nav.clientHeight - box.y - box.h + nav.scrollTop) + "px");
+    el.style.setProperty("--wind-ih", box.h + "px"); // icon stays centred on the link while it rides the leading edge
     el.style.transform = `translate(${box.x}px, ${box.y}px)`;
     el.style.width = box.w + "px";
     el.style.height = box.h + "px";
@@ -243,6 +244,23 @@ function useWindIndicator(navRef, windRef) {
           { opacity: 0.55, offset: 0.3 },
           { transform: "translate(-50%,-50%) scale(1.5)", opacity: 0 },
         ], { duration: 520, delay: 220, easing: "ease-out", fill: "backwards" }));
+      }
+      // the 💨 icon rides the leading edge: streaks out along the travel direction, then puffs as it settles
+      const icon = q(".tg-wind-icon");
+      if (axis === "y" && icon && getComputedStyle(icon).display !== "none") {
+        const d = back ? -1 : 1;
+        fx.push(icon.querySelector("svg").animate([
+          { transform: "translateY(0) scale(1, 1)", opacity: 1 },
+          { transform: `translateY(${d * 2.5}px) scale(.8, 1.5)`, opacity: 0.8, offset: 0.16 },
+          { transform: `translateY(${d * 1.5}px) scale(.88, 1.3)`, opacity: 0.88, offset: 0.48 },
+          { transform: "translateY(0) scale(1.12, .86)", opacity: 1, offset: 0.76 },
+          { transform: "translateY(0) scale(1, 1)", opacity: 1 },
+        ], { duration: WIND_MS, easing: "cubic-bezier(.25,.7,.3,1)" }));
+        fx.push(q(".tg-wind-ipuff").animate([
+          { transform: "translate(-50%,-50%) scale(.35)", opacity: 0 },
+          { opacity: 0.6, offset: 0.3 },
+          { transform: "translate(-50%,-50%) scale(1.7)", opacity: 0 },
+        ], { duration: 460, delay: WIND_MS * 0.6, easing: "ease-out", fill: "backwards" }));
       }
       s.anims = [main, ...fx];
     }
@@ -348,7 +366,22 @@ function WindIndicator({ windRef }) {
         <span className="tg-wind-puff" />
       </div>
       <span className="tg-wind-bar" />
+      <span className="tg-wind-icon"><WindGlyph /><span className="tg-wind-ipuff" /></span>
     </div>
+  );
+}
+
+// Hand-drawn 💨 turned to blow toward the bottom of the sidebar: three speed streaks
+// rush down into an open puff whose outline winds into an inner swirl.
+function WindGlyph() {
+  return (
+    <svg className="tg-wind-glyph" width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor"
+      strokeWidth="1.55" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+      <path className="tg-wg-s" pathLength="100" d="M6.2 1.5c0 2.6.4 4.8.4 6.9" />
+      <path className="tg-wg-s" pathLength="100" d="M10.4 1.5c0 1.8.2 3.2.2 4.6" />
+      <path className="tg-wg-s" pathLength="100" d="M14.6 2.8c0 1.4.2 2.6.2 3.7" />
+      <path className="tg-wg-p" pathLength="100" d="M6 11.5c-1.5.3-2.6 1.6-2.5 3.1.1 1.6 1.6 2.8 3.2 2.6.8 1.2 2.3 1.8 3.7 1.4 1.2-.3 2-1.3 2.2-2.4 1.6.3 3.2-.7 3.5-2.3.3-1.7-.8-3.2-2.4-3.5-.5-1.5-2-2.4-3.5-2.1-1.4.2-2.4 1.4-2.4 2.8 0 1.4 1.1 2.5 2.4 2.5 1 0 1.7-.7 1.7-1.6 0-.7-.6-1.2-1.2-1.1" />
+    </svg>
   );
 }
 
@@ -391,7 +424,7 @@ function Sidebar({ route, nav, mobileOpen, setMobileOpen }) {
                         title={collapsed ? t(it.key) : undefined}
                         onClick={() => { nav(it.path); setMobileOpen(false); }}>
                         <Ico size={18} />
-                        {!collapsed && <span>{t(it.key)}</span>}
+                        {!collapsed && <span className="tg-nav-label">{t(it.key)}</span>}
                       </button>
                     );
                   })}
