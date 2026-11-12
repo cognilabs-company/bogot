@@ -107,29 +107,48 @@ window.Logo = Logo;
 
 // ---------- Sidebar "wind" indicator ----------
 // One shared ribbon that flows between nav links. On navigation the edge facing
-// the travel direction leads (fast spring), the trailing edge follows later with
-// a softer spring, so the ribbon stretches like a gust and then settles.
-const WIND_MS = 600;
-const WIND_FRAMES = 48;
-const WIND_LEAD = { delay: 0, w: 22, z: 0.62, cap: 5 };
-const WIND_TRAIL = { delay: 0.09, w: 11, z: 0.8, cap: 3 };
+// the travel direction leads, the trailing edge follows with a gentle lag, so the
+// ribbon stretches like a gust and then relaxes. Both edges use smooth ease-in-out
+// curves (zero velocity at start and end, no overshoot), sampled densely enough
+// for 60 fps. Every effect timing is a fraction of WIND_MS.
+const WIND_MS = 950;
+const WIND_FRAMES = 120;
+const WIND_LEAD = { from: 0, to: 0.8, ease: [0.5, 0, 0.22, 1] };
+const WIND_TRAIL = { from: 0.14, to: 1, ease: [0.55, 0, 0.3, 1] };
+const WIND_SOFT = "cubic-bezier(.45,0,.55,1)"; // gentle in-out for fades
 
-function windSpring(u, w, z) {
-  if (u <= 0) return 0;
-  const wd = w * Math.sqrt(1 - z * z);
-  return 1 - Math.exp(-z * w * u) * (Math.cos(wd * u) + (z * w / wd) * Math.sin(wd * u));
-}
-// Normalised spring progress: exactly 1 at the end, overshoot capped in px.
-function windEdge(t, p, dist) {
-  const end = WIND_MS / 1000 - p.delay;
-  const u = Math.max(0, t - p.delay);
-  let s = windSpring(u, p.w, p.z);
-  s += (1 - windSpring(end, p.w, p.z)) * Math.pow(Math.min(1, u / end), 3);
-  if (s > 1 && dist > 0) {
-    const peak = Math.exp(-Math.PI * p.z / Math.sqrt(1 - p.z * p.z));
-    s = 1 + (s - 1) * Math.min(1, p.cap / (dist * peak));
+// cubic-bezier(x1,y1,x2,y2) evaluated at x (Newton + bisection fallback)
+function windBezier(x, [x1, y1, x2, y2]) {
+  if (x <= 0) return 0;
+  if (x >= 1) return 1;
+  const cx = 3 * x1, bx = 3 * (x2 - x1) - cx, ax = 1 - cx - bx;
+  const cy = 3 * y1, by = 3 * (y2 - y1) - cy, ay = 1 - cy - by;
+  const fx = (t) => ((ax * t + bx) * t + cx) * t;
+  let t = x;
+  for (let i = 0; i < 8; i++) {
+    const d = (3 * ax * t + 2 * bx) * t + cx;
+    if (Math.abs(d) < 1e-6) break;
+    const nt = t - (fx(t) - x) / d;
+    if (nt < 0 || nt > 1) break;
+    t = nt;
   }
-  return s;
+  if (Math.abs(fx(t) - x) > 1e-5) {
+    let lo = 0, hi = 1; t = x;
+    for (let i = 0; i < 40; i++) { if (fx(t) < x) lo = t; else hi = t; t = (lo + hi) / 2; }
+  }
+  return ((ay * t + by) * t + cy) * t;
+}
+// progress (0..1) of one edge at normalised flight time u
+const windEdge = (u, p) => windBezier((u - p.from) / (p.to - p.from), p.ease);
+// Hermite blend that carries an edge's previous velocity (px/ms) into an interrupted flight and fades it
+// out within window c (keeps velocity continuous; c shrinks so the carried drift never exceeds ~60px)
+const WIND_CARRY_PX = 60;
+function windCarry(u, vel) {
+  if (!vel) return 0;
+  const c = Math.min(0.3, WIND_CARRY_PX / (Math.abs(vel) * WIND_MS * 4 / 27));
+  if (u >= c) return 0;
+  const x = u / c;
+  return vel * WIND_MS * c * x * (1 - x) * (1 - x);
 }
 const windLerp = (a, b, k) => a + (b - a) * k;
 
@@ -146,7 +165,7 @@ function windBoxOf(el, nav) {
 const windSame = (a, b) => !!a && !!b && Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) < 0.5 && Math.abs(a.w - b.w) < 0.5 && Math.abs(a.h - b.h) < 0.5;
 
 function useWindIndicator(navRef, windRef) {
-  const st = shR({ first: true, shown: false, path: null, box: null, axis: "y", flying: false, anims: [] });
+  const st = shR({ first: true, shown: false, path: null, box: null, axis: "y", flying: false, anims: [], flight: null, navIcon: null });
   const syncRef = shR(null);
 
   const apply = (box) => {
@@ -163,7 +182,31 @@ function useWindIndicator(navRef, windRef) {
     st.current.anims.forEach(a => a.cancel());
     st.current.anims = [];
     st.current.flying = false;
+    st.current.flight = null;
     if (windRef.current) windRef.current.removeAttribute("data-flying");
+  };
+  // Live visual state right before a new flight, so the next one continues from it with no jump:
+  // edge velocities of an interrupted flight, and the current opacity/transform/dash of every
+  // animated piece (also catches the idle loop's drift and stream dashes).
+  const snapshot = () => {
+    const el = windRef.current, s = st.current;
+    const snap = { styles: new Map(), vel: null, iconTop: null, dir: el.getAttribute("data-dir") };
+    const f = s.flight;
+    if (s.flying && f && f.anim && f.anim.currentTime != null) {
+      const u = f.anim.currentTime / WIND_MS, du = 0.01;
+      const p0 = f.edges(Math.max(0, u - du)), p1 = f.edges(Math.min(1, u + du));
+      const dt = (Math.min(1, u + du) - Math.max(0, u - du)) * WIND_MS;
+      if (dt > 0) snap.vel = { axis: f.axis, start: (p1.start - p0.start) / dt, end: (p1.end - p0.end) / dt };
+    }
+    const targets = [...el.querySelectorAll(".tg-wind-gust, .tg-wind-tint, .tg-wind-streak, .tg-wind-puff, .tg-wind-icon, .tg-wind-glyph, .tg-wind-glyph path, .tg-wind-ipuff")];
+    if (s.navIcon && s.navIcon.isConnected) targets.push(s.navIcon);
+    targets.forEach(n => {
+      const cs = getComputedStyle(n);
+      snap.styles.set(n, { opacity: cs.opacity, transform: cs.transform, dash: parseFloat(cs.strokeDashoffset) || 0 });
+    });
+    const icon = el.querySelector(".tg-wind-icon");
+    if (icon && getComputedStyle(icon).display !== "none") snap.iconTop = icon.getBoundingClientRect().top;
+    return snap;
   };
   const setShown = (on, instant) => {
     const el = windRef.current;
@@ -178,7 +221,7 @@ function useWindIndicator(navRef, windRef) {
     st.current.shown = on;
   };
 
-  const fly = (from, to, item) => {
+  const fly = (from, to, item, snap) => {
     const el = windRef.current, s = st.current;
     const axis = s.axis;
     const P = axis === "y" ? ["y", "h", "x", "w"] : ["x", "w", "y", "h"];
@@ -192,84 +235,171 @@ function useWindIndicator(navRef, windRef) {
     if (reduce) {
       s.anims = [el.animate([frame(from), frame(to)], { duration: 160, easing: "ease-out" })];
     } else {
+      const ms = (k) => WIND_MS * k;
+      const styles = (snap && snap.styles) || new Map();
+      // run an effect, starting from the element's live value when it was mid-animation
+      const fx = [];
+      const run = (n, kfs, opts, props = ["opacity", "transform"]) => {
+        if (!n) return;
+        const cur = styles.get(n);
+        if (cur) props.forEach(pr => { if (kfs.some(k => pr in k)) kfs[0][pr] = cur[pr]; });
+        fx.push(n.animate(kfs, opts));
+        styles.delete(n);
+      };
+
+      // ---- ribbon: lead edge first, trail edge follows; an interrupted flight keeps its momentum ----
       const aStart = from[pos], aEnd = from[pos] + from[size];
       const bStart = to[pos], bEnd = to[pos] + to[size];
-      const leadDist = back ? Math.abs(aStart - bStart) : Math.abs(aEnd - bEnd);
-      const trailDist = back ? Math.abs(aEnd - bEnd) : Math.abs(aStart - bStart);
-      const frames = [];
+      const v = snap && snap.vel && snap.vel.axis === axis ? snap.vel : { start: 0, end: 0 };
+      const edgeAt = (a, b, k, vel, u) => {
+        let p = windLerp(a, b, k) + windCarry(u, vel);
+        if (b > a) p = Math.min(p, b); else if (b < a) p = Math.max(p, b); // never past the target
+        return p;
+      };
+      // an interrupted flight releases its trailing edge right away, so it never hesitates after braking
+      // (and ramps up sooner, so the new pull overlaps the braking of the old momentum)
+      const moving = !!(v.start || v.end);
+      const lead = moving ? { ...WIND_LEAD, ease: [0.3, 0, 0.22, 1] } : WIND_LEAD;
+      const trail = moving ? { ...WIND_TRAIL, from: 0.04, ease: [0.3, 0, 0.3, 1] } : WIND_TRAIL;
+      const edges = (u) => {
+        const kl = windEdge(u, lead), kt = windEdge(u, trail);
+        const start = edgeAt(aStart, bStart, back ? kl : kt, v.start, u);
+        const end = edgeAt(aEnd, bEnd, back ? kt : kl, v.end, u);
+        return { start, end, kl, kt };
+      };
+      const frames = [], stretch = [], sizes = [];
       for (let i = 0; i <= WIND_FRAMES; i++) {
-        const t = (i / WIND_FRAMES) * (WIND_MS / 1000);
-        const kl = windEdge(t, WIND_LEAD, leadDist);
-        const kt = windEdge(t, WIND_TRAIL, trailDist);
-        let start = windLerp(aStart, bStart, back ? kl : kt);
-        let end = windLerp(aEnd, bEnd, back ? kt : kl);
+        const u = i / WIND_FRAMES;
+        let { start, end, kl, kt } = edges(u);
         if (end - start < 8) { const mid = (start + end) / 2; start = mid - 4; end = mid + 4; }
-        const kc = Math.min(1, kl);
         const b = {};
         b[pos] = start; b[size] = end - start;
-        b[cpos] = windLerp(from[cpos], to[cpos], kc);
-        b[csize] = windLerp(from[csize], to[csize], kc);
-        frames.push({ ...frame(b), offset: i / WIND_FRAMES });
+        b[cpos] = windLerp(from[cpos], to[cpos], kl);
+        b[csize] = windLerp(from[csize], to[csize], kl);
+        frames.push({ ...frame(b), offset: u });
+        stretch.push(Math.max(0, kl - kt));
+        sizes.push(end - start);
       }
       const main = el.animate(frames, { duration: WIND_MS, easing: "linear" });
-      const fx = [];
-      const q = (sel) => el.querySelector(sel);
-      // brighter gust gradient + dimmer base tint while travelling
-      fx.push(q(".tg-wind-gust").animate([{ opacity: 0 }, { opacity: 1, offset: 0.12 }, { opacity: 0.85, offset: 0.5 }, { opacity: 0 }], { duration: WIND_MS, easing: "ease-out" }));
-      fx.push(q(".tg-wind-tint").animate([{ opacity: 1 }, { opacity: 0.45, offset: 0.15 }, { opacity: 0.6, offset: 0.55 }, { opacity: 1 }], { duration: WIND_MS, easing: "ease-in-out" }));
-      // streak lines blowing toward the leading edge
+      s.flight = { anim: main, edges, axis };
+
+      // ---- glow: gust brightens and the base tint dims, both breathing over the whole flight ----
+      run(el.querySelector(".tg-wind-gust"), [{ opacity: 0, easing: WIND_SOFT }, { opacity: 0.85, offset: 0.42, easing: WIND_SOFT }, { opacity: 0 }],
+        { duration: WIND_MS, easing: "linear" });
+      run(el.querySelector(".tg-wind-tint"), [{ opacity: 1, easing: WIND_SOFT }, { opacity: 0.55, offset: 0.42, easing: WIND_SOFT }, { opacity: 1 }],
+        { duration: WIND_MS, easing: "linear" });
+
+      // ---- streak lines drifting toward the leading edge ----
       const sign = back ? -1 : 1;
-      const tr = (v) => axis === "y" ? `translateY(${v}%)` : `translateX(${v}%)`;
+      const tr = (val) => axis === "y" ? `translateY(${val}%)` : `translateX(${val}%)`;
       el.querySelectorAll(".tg-wind-streak").forEach((sk, i) => {
-        fx.push(sk.animate([
-          { transform: tr(-sign * 160), opacity: 0 },
-          { opacity: 0.9, offset: 0.35 },
-          { transform: tr(sign * 220), opacity: 0 },
-        ], { duration: 360 + i * 40, delay: 20 + i * 45, easing: "cubic-bezier(.2,.6,.3,1)", fill: "backwards" }));
+        run(sk, [
+          { transform: tr(-sign * 150), opacity: 0 },
+          { opacity: 0.7, offset: 0.35 },
+          { opacity: 0.7, offset: 0.6 },
+          { transform: tr(sign * 210), opacity: 0 },
+        ], { duration: ms(0.62), delay: ms(0.04 + i * 0.06), easing: "cubic-bezier(.4,0,.45,1)", fill: "backwards" }, ["opacity"]);
       });
-      // airy swirl on the destination icon + soft puff when the ribbon catches
+
+      // ---- destination link icon: a soft airy sway, plus a faint puff behind it when the ribbon arrives ----
       const ico = item && item.querySelector("svg");
-      const puff = q(".tg-wind-puff");
+      const puff = el.querySelector(".tg-wind-puff");
       if (ico) {
         const ir = ico.getBoundingClientRect(), xr = item.getBoundingClientRect();
         puff.style.left = (ir.left - xr.left + ir.width / 2) + "px";
         puff.style.top = (ir.top - xr.top + ir.height / 2) + "px";
-        fx.push(ico.animate([
+        run(ico, [
+          { transform: "rotate(0deg) scale(1)", easing: WIND_SOFT },
+          { transform: "rotate(-10deg) scale(1.08)", offset: 0.45, easing: WIND_SOFT },
           { transform: "rotate(0deg) scale(1)" },
-          { transform: "rotate(-16deg) scale(1.14)", offset: 0.45 },
-          { transform: "rotate(0deg) scale(1)" },
-        ], { duration: 420, delay: 230, easing: "cubic-bezier(.3,.7,.3,1)" }));
-        fx.push(puff.animate([
-          { transform: "translate(-50%,-50%) scale(.3)", opacity: 0 },
-          { opacity: 0.55, offset: 0.3 },
-          { transform: "translate(-50%,-50%) scale(1.5)", opacity: 0 },
-        ], { duration: 520, delay: 220, easing: "ease-out", fill: "backwards" }));
+        ], { duration: ms(0.6), delay: ms(0.38), easing: "linear", fill: "backwards" });
+        run(puff, [
+          { transform: "translate(-50%,-50%) scale(.5)", opacity: 0, easing: WIND_SOFT },
+          { transform: "translate(-50%,-50%) scale(1.05)", opacity: 0.4, offset: 0.45, easing: WIND_SOFT },
+          { transform: "translate(-50%,-50%) scale(1.4)", opacity: 0 },
+        ], { duration: ms(0.56), delay: ms(0.44), easing: "linear", fill: "backwards" });
       }
-      // the 💨 icon rides the leading edge: streaks out along the travel direction, then puffs as it settles
-      const icon = q(".tg-wind-icon");
+      s.navIcon = ico || null;
+
+      // ---- the 💨 icon rides the leading edge (same keyframes as the ribbon, so it is locked to it) ----
+      const icon = el.querySelector(".tg-wind-icon");
       if (axis === "y" && icon && getComputedStyle(icon).display !== "none") {
+        const glyph = icon.querySelector("svg");
+        // its stretch follows the ribbon's own stretch, so it grows and relaxes with it
+        const peak = Math.max(...stretch);
         const d = back ? -1 : 1;
-        fx.push(icon.querySelector("svg").animate([
-          { transform: "translateY(0) scale(1, 1)", opacity: 1 },
-          { transform: `translateY(${d * 2.5}px) scale(.8, 1.5)`, opacity: 0.8, offset: 0.16 },
-          { transform: `translateY(${d * 1.5}px) scale(.88, 1.3)`, opacity: 0.88, offset: 0.48 },
-          { transform: "translateY(0) scale(1.12, .86)", opacity: 1, offset: 0.76 },
-          { transform: "translateY(0) scale(1, 1)", opacity: 1 },
-        ], { duration: WIND_MS, easing: "cubic-bezier(.25,.7,.3,1)" }));
-        fx.push(q(".tg-wind-ipuff").animate([
-          { transform: "translate(-50%,-50%) scale(.35)", opacity: 0 },
-          { opacity: 0.6, offset: 0.3 },
-          { transform: "translate(-50%,-50%) scale(1.7)", opacity: 0 },
-        ], { duration: 460, delay: WIND_MS * 0.6, easing: "ease-out", fill: "backwards" }));
+        const gk = stretch.map((st0, i) => {
+          const k = peak > 0.001 ? st0 / peak : 0;
+          return { transform: `translateY(${(d * 1.2 * k).toFixed(3)}px) scale(${(1 - 0.08 * k).toFixed(4)}, ${(1 + 0.24 * k).toFixed(4)})`, opacity: +(1 - 0.12 * k).toFixed(4), offset: i / WIND_FRAMES };
+        });
+        // ease out of whatever the idle drift / previous flight left on the glyph
+        const cur = styles.get(glyph);
+        if (cur && cur.transform !== "none") {
+          const blend = Math.max(2, Math.round(WIND_FRAMES * 0.15));
+          gk[0].transform = cur.transform; gk[0].opacity = +cur.opacity;
+          for (let i = 1; i < blend; i++) gk[i] = { offset: gk[i].offset, opacity: gk[i].opacity }; // let WAAPI blend to the stretch curve
+          styles.delete(glyph);
+        }
+        fx.push(glyph.animate(gk, { duration: WIND_MS, easing: "linear" }));
+        // the idle streams finish their current stroke instead of snapping back to "drawn"
+        glyph.querySelectorAll("path").forEach(pth => {
+          const cur2 = styles.get(pth);
+          const period = pth.classList.contains("tg-wg-p") ? 116 : 160;
+          const d0 = cur2 ? cur2.dash : 0;
+          styles.delete(pth);
+          if (d0 > 0.5 && d0 < period - 0.5) {
+            fx.push(pth.animate([{ strokeDashoffset: d0 }, { strokeDashoffset: period }], { duration: ms(0.55), easing: "cubic-bezier(.3,0,.3,1)", fill: "forwards" }));
+          }
+        });
+        // a direction change mid-flight moves the icon to the other edge: it keeps riding the old edge
+        // (same velocity, no corner) and blends over to the new leading edge
+        if (snap && snap.iconTop != null) {
+          const dy0 = snap.iconTop - icon.getBoundingClientRect().top;
+          if (Math.abs(dy0) > 0.5) {
+            const flip = snap.dir !== el.getAttribute("data-dir") ? (back ? 1 : -1) : 0; // old anchor below (+) / above (-)
+            const span = 0.5, ik = [];
+            for (let i = 0; i <= WIND_FRAMES; i++) {
+              const u = i / WIND_FRAMES;
+              if (u > span) break;
+              const x = u / span, fade = 1 - x * x * x * (x * (x * 6 - 15) + 10); // smootherstep
+              const dy = (dy0 + flip * (sizes[i] - sizes[0])) * fade;
+              ik.push({ transform: `translateY(${dy.toFixed(2)}px)`, offset: u / span });
+            }
+            ik[ik.length - 1] = { transform: "translateY(0px)", offset: 1 };
+            styles.delete(icon);
+            fx.push(icon.animate(ik, { duration: ms(span), easing: "linear" }));
+          }
+        }
+        // arrival: a soft glow that fades in and out, no pop
+        run(el.querySelector(".tg-wind-ipuff"), [
+          { transform: "translate(-50%,-50%) scale(.6)", opacity: 0, easing: WIND_SOFT },
+          { transform: "translate(-50%,-50%) scale(1.1)", opacity: 0.32, offset: 0.45, easing: WIND_SOFT },
+          { transform: "translate(-50%,-50%) scale(1.45)", opacity: 0 },
+        ], { duration: ms(0.42), delay: ms(0.58), easing: "linear", fill: "backwards" });
       }
+      // anything still mid-effect from the previous flight that this one doesn't drive: settle it softly
+      // from where it was to its resting value (the old animations are already cancelled here)
+      styles.forEach((cur, n) => {
+        if (!n.isConnected || n.tagName.toLowerCase() === "path") return;
+        const rest = getComputedStyle(n), k0 = {}, k1 = {};
+        if (cur.transform !== rest.transform) { k0.transform = cur.transform; k1.transform = rest.transform; }
+        if (Math.abs(+cur.opacity - +rest.opacity) > 0.01) { k0.opacity = +cur.opacity; k1.opacity = +rest.opacity; }
+        if (Object.keys(k0).length) fx.push(n.animate([k0, k1], { duration: ms(0.35), easing: WIND_SOFT }));
+      });
       s.anims = [main, ...fx];
     }
+    // start on this frame's clock (not the next frame): no held frame between the old and the new flight
+    const now = document.timeline && document.timeline.currentTime;
+    if (now != null) s.anims.forEach(a => { a.startTime = now; });
     s.flying = true;
     el.setAttribute("data-flying", "1");
     const main = s.anims[0];
     main.onfinish = () => {
       if (s.anims[0] !== main) return;
+      s.anims.forEach(a => { if (a !== main) a.cancel(); });
+      s.anims = [];
       s.flying = false;
+      s.flight = null;
       el.removeAttribute("data-flying");
       syncRef.current && syncRef.current();
     };
@@ -304,8 +434,9 @@ function useWindIndicator(navRef, windRef) {
       setShown(true, s.first);
     } else if (s.path !== path) {
       const from = s.flying ? windBoxOf(el, nav) : s.box;
+      const snap = snapshot();
       stopFlight();
-      fly(from, box, item);
+      fly(from, box, item, snap);
     } else if (!s.flying && !windSame(box, s.box)) {
       apply(box);
     }

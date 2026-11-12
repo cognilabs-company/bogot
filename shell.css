@@ -18,7 +18,10 @@
 .tg-nav-item[data-active="1"], .tg-nav-item[data-active="1"]:hover { background: transparent; color: var(--accent); font-weight: 600; }
 
 /* ---- "wind" ribbon: one indicator that flows between nav links ---- */
-.tg-wind { position: absolute; left: 0; top: 0; width: 0; height: 0; z-index: 0; pointer-events: none; opacity: 0; transition: opacity .22s var(--ease); will-change: transform, height; contain: layout style; }
+.tg-wind { position: absolute; left: 0; top: 0; width: 0; height: 0; z-index: 0; pointer-events: none; opacity: 0; transition: opacity .22s var(--ease); contain: layout style; }
+/* compositor hints only while a flight is running */
+.tg-wind[data-flying="1"] { will-change: transform, width, height; }
+.tg-wind[data-flying="1"] .tg-wind-glyph, .tg-wind[data-flying="1"] .tg-wind-streak { will-change: transform, opacity; }
 .tg-wind[data-shown="1"] { opacity: 1; }
 .tg-wind-body { position: absolute; inset: 0; border-radius: 9px; overflow: hidden;
   box-shadow: 0 0 0 1px rgba(var(--accent-rgb), .07), 0 6px 18px -10px rgba(var(--accent-rgb), .55); }
@@ -68,16 +71,16 @@
 .tg-wg-p { stroke-dasharray: 100 16; stroke-dashoffset: 0; }
 .tg-wind-ipuff { position: absolute; left: 50%; top: 50%; width: 30px; height: 30px; border-radius: 50%; opacity: 0; transform: translate(-50%, -50%); pointer-events: none;
   background: radial-gradient(circle, rgba(var(--accent-rgb), .34) 0%, rgba(var(--accent-rgb), .1) 45%, rgba(var(--accent-rgb), 0) 70%); }
-/* idle (slow, ~2.8s): the whole gust drifts a touch downward */
-.tg-wind:not([data-flying]) .tg-wind-glyph { animation: tg-wind-drift 2.8s ease-in-out infinite; }
+/* idle (slow and soft, ~3.8s): the whole gust drifts a touch downward and back */
+.tg-wind:not([data-flying]) .tg-wind-glyph { animation: tg-wind-drift 3.8s cubic-bezier(.45,0,.55,1) infinite; }
 /* streaks stream out downward and redraw from the top; a pocket of air circles round the puff into its swirl */
-.tg-wind:not([data-flying]) .tg-wg-s { animation: tg-wind-stream 2.8s cubic-bezier(.5,0,.35,1) infinite; }
-.tg-wind:not([data-flying]) .tg-wg-s:nth-child(2) { animation-delay: .22s; }
-.tg-wind:not([data-flying]) .tg-wg-s:nth-child(3) { animation-delay: .44s; }
-.tg-wind:not([data-flying]) .tg-wg-p { animation: tg-wind-swirl 2.8s cubic-bezier(.45,.05,.4,1) .5s infinite; }
-@keyframes tg-wind-stream { 0% { stroke-dashoffset: 0; } 46%, 100% { stroke-dashoffset: 160; } }
-@keyframes tg-wind-swirl { 0% { stroke-dashoffset: 0; } 64%, 100% { stroke-dashoffset: 116; } }
-@keyframes tg-wind-drift { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(1.2px); } }
+.tg-wind:not([data-flying]) .tg-wg-s { animation: tg-wind-stream 3.8s cubic-bezier(.45,0,.4,1) infinite; }
+.tg-wind:not([data-flying]) .tg-wg-s:nth-child(2) { animation-delay: .3s; }
+.tg-wind:not([data-flying]) .tg-wg-s:nth-child(3) { animation-delay: .6s; }
+.tg-wind:not([data-flying]) .tg-wg-p { animation: tg-wind-swirl 3.8s cubic-bezier(.45,0,.4,1) .7s infinite; }
+@keyframes tg-wind-stream { 0% { stroke-dashoffset: 0; } 50%, 100% { stroke-dashoffset: 160; } }
+@keyframes tg-wind-swirl { 0% { stroke-dashoffset: 0; } 66%, 100% { stroke-dashoffset: 116; } }
+@keyframes tg-wind-drift { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(1px); } }
 /* collapsed rail: icon-only items have no room, the ribbon alone marks the link */
 .tg-sidebar.collapsed .tg-wind-icon { opacity: 0; transition-duration: .08s; }
 .tg-sidebar.collapsed .tg-wind-glyph, .tg-sidebar.collapsed .tg-wind-glyph path { animation-play-state: paused; }
