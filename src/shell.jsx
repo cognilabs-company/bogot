@@ -116,6 +116,15 @@ const WIND_FRAMES = 120;
 const WIND_LEAD = { from: 0, to: 0.8, ease: [0.5, 0, 0.22, 1] };
 const WIND_TRAIL = { from: 0.14, to: 1, ease: [0.55, 0, 0.3, 1] };
 const WIND_SOFT = "cubic-bezier(.45,0,.55,1)"; // gentle in-out for fades
+// Flying up, the 💨 turns over first: its puff rises to the top and the streaks slide out below it,
+// then the ribbon takes off with the streaks trailing; on arrival it turns back to blowing down.
+const WIND_FLIP_MS = 300;
+const WIND_FLIP_CLOUD = 8.5; // puff moves up by this (glyph units)
+const WIND_FLIP_LINES = 10.5; // streaks move down by this
+const windFlipOf = (cur) => {
+  if (!cur || !cur.transform || cur.transform === "none") return 0;
+  try { return Math.max(0, Math.min(1, -new DOMMatrix(cur.transform).m42 / WIND_FLIP_CLOUD)); } catch { return 0; }
+};
 
 // cubic-bezier(x1,y1,x2,y2) evaluated at x (Newton + bisection fallback)
 function windBezier(x, [x1, y1, x2, y2]) {
@@ -193,12 +202,12 @@ function useWindIndicator(navRef, windRef) {
     const snap = { styles: new Map(), vel: null, iconTop: null, dir: el.getAttribute("data-dir") };
     const f = s.flight;
     if (s.flying && f && f.anim && f.anim.currentTime != null) {
-      const u = f.anim.currentTime / WIND_MS, du = 0.01;
+      const u = Math.max(0, Math.min(1, (f.anim.currentTime - f.pre) / WIND_MS)), du = 0.01;
       const p0 = f.edges(Math.max(0, u - du)), p1 = f.edges(Math.min(1, u + du));
       const dt = (Math.min(1, u + du) - Math.max(0, u - du)) * WIND_MS;
       if (dt > 0) snap.vel = { axis: f.axis, start: (p1.start - p0.start) / dt, end: (p1.end - p0.end) / dt };
     }
-    const targets = [...el.querySelectorAll(".tg-wind-gust, .tg-wind-tint, .tg-wind-streak, .tg-wind-puff, .tg-wind-icon, .tg-wind-glyph, .tg-wind-glyph path, .tg-wind-ipuff")];
+    const targets = [...el.querySelectorAll(".tg-wind-gust, .tg-wind-tint, .tg-wind-streak, .tg-wind-puff, .tg-wind-icon, .tg-wind-glyph, .tg-wind-glyph path, .tg-wg-lines, .tg-wg-cloud, .tg-wind-ipuff")];
     if (s.navIcon && s.navIcon.isConnected) targets.push(s.navIcon);
     targets.forEach(n => {
       const cs = getComputedStyle(n);
@@ -281,7 +290,7 @@ function useWindIndicator(navRef, windRef) {
         sizes.push(end - start);
       }
       const main = el.animate(frames, { duration: WIND_MS, easing: "linear" });
-      s.flight = { anim: main, edges, axis };
+      s.flight = { anim: main, edges, axis, pre: 0 };
 
       // ---- glow: gust brightens and the base tint dims, both breathing over the whole flight ----
       run(el.querySelector(".tg-wind-gust"), [{ opacity: 0, easing: WIND_SOFT }, { opacity: 0.85, offset: 0.42, easing: WIND_SOFT }, { opacity: 0 }],
@@ -376,6 +385,59 @@ function useWindIndicator(navRef, windRef) {
           { transform: "translate(-50%,-50%) scale(1.1)", opacity: 0.32, offset: 0.45, easing: WIND_SOFT },
           { transform: "translate(-50%,-50%) scale(1.45)", opacity: 0 },
         ], { duration: ms(0.42), delay: ms(0.58), easing: "linear", fill: "backwards" });
+      }
+      // ---- 💨 turns over for an upward flight: puff on top, streaks trailing below; turns back on arrival ----
+      const cloud = icon && icon.querySelector(".tg-wg-cloud"), lines = icon && icon.querySelector(".tg-wg-lines");
+      const iconOn = axis === "y" && cloud && lines && getComputedStyle(icon).display !== "none" && !el.closest(".tg-sidebar.collapsed");
+      const flip0 = windFlipOf(styles.get(cloud));
+      if (iconOn && (back || flip0 > 0.01)) {
+        // a fresh upward flight waits for the turn; one that interrupts a moving ribbon turns while flying
+        const pre = back && !moving ? Math.round(WIND_FLIP_MS * (1 - flip0)) : 0;
+        if (pre > 0) {
+          fx.forEach(a => {
+            const t = a.effect.getTiming();
+            a.effect.updateTiming({ delay: (t.delay || 0) + pre, fill: t.fill === "forwards" || t.fill === "both" ? "both" : "backwards" });
+          });
+          main.effect.updateTiming({ delay: pre, fill: "backwards" });
+          s.flight.pre = pre;
+        }
+        const T = pre + WIND_MS;
+        const at = (ms0) => Math.max(0, Math.min(1, ms0 / T));
+        const C = (k) => `translateY(${(-WIND_FLIP_CLOUD * k).toFixed(2)}px)`;
+        const L = (y, sy) => `translateY(${y}px) scaleY(${sy})`;
+        const N = { transform: L(0, 1), opacity: 1 }, F = { transform: L(WIND_FLIP_LINES, 1), opacity: 1 };
+        const hidTop = { transform: L(0, 0.15), opacity: 0 }, hidBot = { transform: L(WIND_FLIP_LINES, 0.15), opacity: 0 };
+        const ck = [], lk = [];
+        let tFlipped; // when the glyph is fully turned over
+        if (back) {
+          const tIn = pre || Math.round(WIND_FLIP_MS * (1 - flip0)) || 0;
+          ck.push({ transform: C(flip0), offset: 0, easing: WIND_SOFT });
+          if (flip0 > 0.5) lk.push({ ...F, offset: 0 }); // already (mostly) turned: streaks are below
+          else lk.push({ ...N, offset: 0, easing: "cubic-bezier(.5,0,.75,0)" }, { ...hidTop, offset: at(tIn * 0.45) }, { ...hidBot, offset: at(tIn * 0.5), easing: "cubic-bezier(.25,1,.5,1)" });
+          tFlipped = tIn;
+        } else {
+          tFlipped = 0; // turning back at the start of a downward flight
+        }
+        // turned over (puff up, streaks below) until the leading edge lands, then turn back
+        const outStart = back ? pre + WIND_MS * 0.78 : 0, outEnd = back ? T : WIND_MS * 0.36;
+        if (back) {
+          ck.push({ transform: C(1), offset: at(tFlipped) }, { transform: C(1), offset: at(outStart), easing: WIND_SOFT });
+          lk.push({ ...F, offset: at(tFlipped) }, { ...F, offset: at(outStart), easing: "cubic-bezier(.5,0,.75,0)" });
+        } else {
+          ck.push({ transform: C(flip0), offset: 0, easing: WIND_SOFT });
+          lk.push({ ...F, opacity: flip0, offset: 0, easing: "cubic-bezier(.5,0,.75,0)" });
+        }
+        const out = outEnd - outStart;
+        ck.push({ transform: C(0), offset: at(outEnd) });
+        lk.push({ ...hidBot, offset: at(outStart + out * 0.45) }, { ...hidTop, offset: at(outStart + out * 0.5), easing: "cubic-bezier(.25,1,.5,1)" }, { ...N, offset: at(outEnd) });
+        if (ck[ck.length - 1].offset < 1) ck.push({ transform: C(0), offset: 1 });
+        if (lk[lk.length - 1].offset < 1) lk.push({ ...N, offset: 1 });
+        // keep offsets non-decreasing (a zero-length turn collapses to one point)
+        [ck, lk].forEach(k => k.forEach((f, i) => { if (i && f.offset < k[i - 1].offset) f.offset = k[i - 1].offset; }));
+        const lcur = styles.get(lines);
+        if (lcur && back && flip0 > 0.01 && flip0 <= 0.5) { lk[0].transform = lcur.transform; lk[0].opacity = +lcur.opacity; }
+        styles.delete(cloud); styles.delete(lines);
+        fx.push(cloud.animate(ck, { duration: T, easing: "linear" }), lines.animate(lk, { duration: T, easing: "linear" }));
       }
       // anything still mid-effect from the previous flight that this one doesn't drive: settle it softly
       // from where it was to its resting value (the old animations are already cancelled here)
@@ -508,10 +570,12 @@ function WindGlyph() {
   return (
     <svg className="tg-wind-glyph" width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor"
       strokeWidth="1.55" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
-      <path className="tg-wg-s" pathLength="100" d="M6.2 1.5c0 2.6.4 4.8.4 6.9" />
-      <path className="tg-wg-s" pathLength="100" d="M10.4 1.5c0 1.8.2 3.2.2 4.6" />
-      <path className="tg-wg-s" pathLength="100" d="M14.6 2.8c0 1.4.2 2.6.2 3.7" />
-      <path className="tg-wg-p" pathLength="100" d="M6 11.5c-1.5.3-2.6 1.6-2.5 3.1.1 1.6 1.6 2.8 3.2 2.6.8 1.2 2.3 1.8 3.7 1.4 1.2-.3 2-1.3 2.2-2.4 1.6.3 3.2-.7 3.5-2.3.3-1.7-.8-3.2-2.4-3.5-.5-1.5-2-2.4-3.5-2.1-1.4.2-2.4 1.4-2.4 2.8 0 1.4 1.1 2.5 2.4 2.5 1 0 1.7-.7 1.7-1.6 0-.7-.6-1.2-1.2-1.1" />
+      <g className="tg-wg-lines">
+        <path className="tg-wg-s" pathLength="100" d="M6.2 1.5c0 2.6.4 4.8.4 6.9" />
+        <path className="tg-wg-s" pathLength="100" d="M10.4 1.5c0 1.8.2 3.2.2 4.6" />
+        <path className="tg-wg-s" pathLength="100" d="M14.6 2.8c0 1.4.2 2.6.2 3.7" />
+      </g>
+      <g className="tg-wg-cloud"><path className="tg-wg-p" pathLength="100" d="M6 11.5c-1.5.3-2.6 1.6-2.5 3.1.1 1.6 1.6 2.8 3.2 2.6.8 1.2 2.3 1.8 3.7 1.4 1.2-.3 2-1.3 2.2-2.4 1.6.3 3.2-.7 3.5-2.3.3-1.7-.8-3.2-2.4-3.5-.5-1.5-2-2.4-3.5-2.1-1.4.2-2.4 1.4-2.4 2.8 0 1.4 1.1 2.5 2.4 2.5 1 0 1.7-.7 1.7-1.6 0-.7-.6-1.2-1.2-1.1" /></g>
     </svg>
   );
 }

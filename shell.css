@@ -67,6 +67,9 @@
 .tg-wind-glyph { display: block; overflow: visible; transform-origin: 50% 0%;
   filter: drop-shadow(0 0 3px rgba(var(--accent-rgb), .28)); }
 .tg-wind[data-dir="up"] .tg-wind-glyph { transform-origin: 50% 100%; }
+/* flying up the glyph turns over (driven from JS): the puff rises, the streaks re-grow below it */
+.tg-wg-lines { transform-box: fill-box; transform-origin: 50% 0%; }
+.tg-wg-cloud { transform-box: fill-box; transform-origin: 50% 50%; }
 .tg-wg-s { stroke-dasharray: 100 60; stroke-dashoffset: 0; }
 .tg-wg-p { stroke-dasharray: 100 16; stroke-dashoffset: 0; }
 .tg-wind-ipuff { position: absolute; left: 50%; top: 50%; width: 30px; height: 30px; border-radius: 50%; opacity: 0; transform: translate(-50%, -50%); pointer-events: none;
