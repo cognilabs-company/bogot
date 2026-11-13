@@ -1105,58 +1105,473 @@ function Toasts() {
 }
 
 // ---------- Login ----------
+// ---------- Login: "Quyosh fermasi" (solar farm at sunrise) ----------
+// The form is plain DOM and usable instantly. Behind it: an SVG solar farm (first paint, mobile,
+// reduced-motion and no-WebGL fallback) and, on capable desktops, a lazily imported three.js scene
+// (src/login-scene.js) that fades in over it. Everything in the scene layer is aria-hidden.
+const { useLayoutEffect: shLE, useCallback: shCB } = React;
+const LOGIN_MOBILE_MQ = "(max-width: 767px)";
+const LOGIN_REDUCED_MQ = "(prefers-reduced-motion: reduce)";
+
+function useLoginMedia(query) {
+  const get = () => !!(window.matchMedia && window.matchMedia(query).matches);
+  const [match, setMatch] = shS(get);
+  shE(() => {
+    if (!window.matchMedia) return undefined;
+    const mq = window.matchMedia(query);
+    const on = () => setMatch(mq.matches);
+    on();
+    mq.addEventListener ? mq.addEventListener("change", on) : mq.addListener(on);
+    return () => (mq.removeEventListener ? mq.removeEventListener("change", on) : mq.removeListener(on));
+  }, [query]);
+  return match;
+}
+
+function useDocTheme() {
+  const read = () => (document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark");
+  const [theme, setTheme] = shS(read);
+  shE(() => {
+    const mo = new MutationObserver(() => setTheme(read()));
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    setTheme(read());
+    return () => mo.disconnect();
+  }, []);
+  return theme;
+}
+
+// WebGL present and the device is not obviously weak (few cores, little memory, software GL).
+function loginCan3D() {
+  try {
+    if (navigator.hardwareConcurrency && navigator.hardwareConcurrency < 4) return false;
+    if (navigator.deviceMemory && navigator.deviceMemory < 4) return false;
+    const c = document.createElement("canvas");
+    const gl = c.getContext("webgl2") || c.getContext("webgl");
+    if (!gl) return false;
+    const info = gl.getExtension("WEBGL_debug_renderer_info");
+    const name = String(info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER) || "");
+    const lose = gl.getExtension("WEBGL_lose_context");
+    lose && lose.loseContext();
+    return !/swiftshader|llvmpipe|software|basic render/i.test(name);
+  } catch { return false; }
+}
+
+// Perspective solar field for the SVG scene: a pinhole camera 3 m above the ground.
+function solarFieldGeometry(lite) {
+  const W = lite ? 420 : 1600, Hh = lite ? 280 : 900;
+  const y0 = lite ? 150 : 330, cx = W / 2, f = lite ? 300 : 900, cam = lite ? 3 : 6.6;
+  const P = (x, y, d) => [cx + (f * x) / d, y0 + (f * (cam - y)) / d];
+  const pt = ([x, y]) => `${x.toFixed(1)} ${y.toFixed(1)}`;
+  const rowsN = lite ? 6 : 12;
+  const rows = [];
+  for (let r = rowsN - 1; r >= 0; r--) {
+    const d = lite ? 4.2 + r * 4.6 : 9.5 + r * 7.6;
+    const df = d - 1.5, db = d + 1.5, yf = 0.42, yb = 1.62;
+    const half = Math.min(60, ((W / 2) * db) / f + 1.2);
+    const poly = [P(-half, yf, df), P(half, yf, df), P(half, yb, db), P(-half, yb, db)].map(pt).join(" L ");
+    let lines = "", cells = "", legs = "";
+    const modPx = (f * 1.035) / df;
+    for (let x = -half + 0.5; x < half; x += 1.035) {
+      lines += `M${pt(P(x, yf, df))} L${pt(P(x, yb, db))} `;
+      if (modPx > 26) for (let k = 1; k < 6; k++) { const xx = x + (k * 1.035) / 6; cells += `M${pt(P(xx, yf, df))} L${pt(P(xx, yb, db))} `; }
+    }
+    const rowPx = (f * 1.2) / df;
+    const nCells = rowPx > 50 ? 20 : rowPx > 18 ? 4 : 2;
+    for (let k = 1; k < nCells; k++) {
+      const t = k / nCells, dd = df + (db - df) * t, yy = yf + (yb - yf) * t;
+      (k === nCells / 2 ? (s) => { lines += s; } : (s) => { cells += s; })(`M${pt(P(-half, yy, dd))} L${pt(P(half, yy, dd))} `);
+    }
+    if (df < 26) for (let x = -half; x < half; x += 3.2) { legs += `M${pt(P(x, 0, df + 0.1))} L${pt(P(x, yf, df + 0.1))} M${pt(P(x, 0, db - 0.1))} L${pt(P(x, yb, db - 0.1))} `; }
+    rows.push({ r, poly: `M${poly} Z`, lines, cells, legs, front: P(0, 0, df)[1] });
+  }
+  const sun = lite ? { x: W * 0.79, y: 108, r: 14 } : { x: W * 0.55, y: 222, r: 22 };
+  const stars = [];
+  let seed = 7;
+  const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  for (let i = 0; i < (lite ? 22 : 70); i++) stars.push([rnd() * W, rnd() * y0 * 0.8, 0.5 + rnd() * (lite ? 0.8 : 1.3), rnd() * 4]);
+  const photons = [];
+  for (let i = 0; i < (lite ? 6 : 12); i++) {
+    const row = rows[rows.length - 1 - Math.floor(rnd() * Math.min(5, rows.length))];
+    const tx = (rnd() - 0.5) * W * 0.8 + W / 2;
+    photons.push({ dx: tx - sun.x, dy: row.front - 30 - sun.y - rnd() * 40, delay: (1.3 + rnd() * 3).toFixed(2), dur: (2.2 + rnd() * 1.4).toFixed(2) });
+  }
+  return { W, Hh, y0, rows, sun, stars, photons };
+}
+
+function SolarField({ lite, anchor, svgRef, pulseRef }) {
+  const g = shM(() => solarFieldGeometry(lite), [lite]);
+  const id = lite ? "tgsl" : "tgsf";
+  const end = anchor || { x: g.W / 2, y: g.Hh + 4 };
+  const sx = g.sun.x, start = lite ? { x: sx, y: g.y0 + 26 } : { x: end.x * 0.7 + g.W * 0.15, y: g.Hh + 20 };
+  const energyPath = `M${start.x.toFixed(1)} ${start.y.toFixed(1)} C ${start.x.toFixed(1)} ${(start.y + (end.y - start.y) * 0.55).toFixed(1)}, ${end.x.toFixed(1)} ${(end.y - (end.y - start.y) * 0.45).toFixed(1)}, ${end.x.toFixed(1)} ${end.y.toFixed(1)}`;
+  return (
+    <svg ref={svgRef} className="tg-ss" viewBox={`0 0 ${g.W} ${g.Hh}`} preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">
+      <defs>
+        <linearGradient id={`${id}-sky`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" style={{ stopColor: "var(--ss-top)" }} />
+          <stop offset=".62" style={{ stopColor: "var(--ss-mid)" }} />
+          <stop offset="1" style={{ stopColor: "var(--ss-horizon)" }} />
+        </linearGradient>
+        <linearGradient id={`${id}-ground`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" style={{ stopColor: "var(--ss-ground-far)" }} />
+          <stop offset="1" style={{ stopColor: "var(--ss-ground)" }} />
+        </linearGradient>
+        <linearGradient id={`${id}-panel`} x1="0" y1="1" x2="0" y2="0">
+          <stop offset="0" style={{ stopColor: "var(--ss-cell)" }} />
+          <stop offset=".7" style={{ stopColor: "var(--ss-cell-2)" }} />
+          <stop offset="1" style={{ stopColor: "var(--ss-cell-sky)" }} />
+        </linearGradient>
+        <radialGradient id={`${id}-glow`} cx={sx} cy={g.sun.y} r={g.sun.r * 9} gradientUnits="userSpaceOnUse">
+          <stop offset="0" style={{ stopColor: "var(--ss-sun)", stopOpacity: .9 }} />
+          <stop offset=".25" style={{ stopColor: "var(--ss-sun)", stopOpacity: .35 }} />
+          <stop offset="1" style={{ stopColor: "var(--ss-sun)", stopOpacity: 0 }} />
+        </radialGradient>
+        <radialGradient id={`${id}-refl`} cx={sx} cy={g.y0 + (g.Hh - g.y0) * 0.35} r={g.Hh * 0.55} gradientUnits="userSpaceOnUse" gradientTransform={`translate(${sx} ${g.y0}) scale(.32 1) translate(${-sx} ${-g.y0})`}>
+          <stop offset="0" style={{ stopColor: "var(--ss-sun)", stopOpacity: .75 }} />
+          <stop offset=".5" style={{ stopColor: "var(--ss-sun)", stopOpacity: .18 }} />
+          <stop offset="1" style={{ stopColor: "var(--ss-sun)", stopOpacity: 0 }} />
+        </radialGradient>
+        <linearGradient id={`${id}-sweep`} x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stopColor="#fff" stopOpacity="0" />
+          <stop offset=".5" style={{ stopColor: "var(--ss-sun)", stopOpacity: .85 }} />
+          <stop offset="1" stopColor="#fff" stopOpacity="0" />
+        </linearGradient>
+        <clipPath id={`${id}-panels`}>{g.rows.map((row) => <path key={row.r} d={row.poly} />)}</clipPath>
+        <filter id={`${id}-blur`} x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation={lite ? 3 : 7} /></filter>
+        <filter id={`${id}-soft`} x="-20%" y="-50%" width="140%" height="200%"><feGaussianBlur stdDeviation={lite ? 2 : 3.5} /></filter>
+      </defs>
+      <g className="tg-ss-world">
+        <rect width={g.W} height={g.y0 + 2} fill={`url(#${id}-sky)`} />
+        <g className="tg-ss-stars">{g.stars.map(([x, y, r, d], i) => <circle key={i} cx={x} cy={y} r={r} style={{ animationDelay: `${d}s` }} />)}</g>
+        <g className="tg-ss-sun tg-intro">
+          <circle cx={sx} cy={g.sun.y} r={g.sun.r * 9} fill={`url(#${id}-glow)`} />
+          <circle className="tg-ss-sun-disc" cx={sx} cy={g.sun.y} r={g.sun.r} />
+        </g>
+        <g className="tg-ss-cloud" filter={`url(#${id}-soft)`}>
+          {[[-1.6, .25, 1.5], [-.4, -.2, 1.9], [1, .1, 1.6], [2, .35, 1.1], [.2, .45, 2.2]].map(([dx, dy, r], i) => (
+            <ellipse key={i} cx={sx + dx * g.sun.r * 1.3} cy={g.sun.y + dy * g.sun.r * 1.2} rx={r * g.sun.r * 1.2} ry={r * g.sun.r * 0.75} />
+          ))}
+        </g>
+        <rect y={g.y0} width={g.W} height={g.Hh - g.y0} fill={`url(#${id}-ground)`} />
+        <rect className="tg-ss-haze" y={g.y0 - (lite ? 6 : 16)} width={g.W} height={lite ? 14 : 34} filter={`url(#${id}-blur)`} />
+        {g.rows.map((row, i) => (
+          <g key={row.r} className="tg-ss-row">
+            <path className="tg-ss-legs" d={row.legs} />
+            <path d={row.poly} fill={`url(#${id}-panel)`} />
+            <path className="tg-ss-cells" d={row.cells} />
+            <path className="tg-ss-frame" d={row.lines + row.poly} />
+            <path className="tg-ss-shade tg-intro" d={row.poly} style={{ animationDelay: `${0.35 + i * 0.07}s` }} />
+          </g>
+        ))}
+        <g clipPath={`url(#${id}-panels)`}>
+          <rect className="tg-ss-refl" y={g.y0} width={g.W} height={g.Hh - g.y0} fill={`url(#${id}-refl)`} />
+          <rect className="tg-ss-charge" y={g.y0} width={g.W} height={g.Hh - g.y0} />
+          <rect className="tg-ss-sweep tg-intro" x={-g.W * 0.25} y={g.y0} width={g.W * 0.22} height={g.Hh - g.y0} fill={`url(#${id}-sweep)`} />
+        </g>
+        <path className="tg-ss-energy-glow" d={energyPath} />
+        <path className="tg-ss-energy" d={energyPath} />
+        <g className="tg-ss-photons">
+          {g.photons.map((p, i) => (
+            <circle key={i} cx={sx} cy={g.sun.y} r={lite ? 1.6 : 2.6} style={{ "--dx": `${p.dx.toFixed(0)}px`, "--dy": `${p.dy.toFixed(0)}px`, animationDelay: `${p.delay}s`, animationDuration: `${p.dur}s` }} />
+          ))}
+        </g>
+        <circle className="tg-ss-pulse" r={lite ? 3 : 5} opacity="0">
+          <animateMotion id={`${id}-pulse`} ref={pulseRef} dur="0.9s" begin="indefinite" fill="remove" path={energyPath} />
+          <animate attributeName="opacity" values="1;1;0" dur="0.9s" begin={`${id}-pulse.begin`} fill="remove" />
+        </circle>
+        <circle className="tg-ss-pulse tg-ss-pulse-loop" r={lite ? 2.4 : 4}>
+          <animateMotion dur="2.6s" repeatCount="indefinite" path={energyPath} />
+        </circle>
+      </g>
+    </svg>
+  );
+}
+
+function LoginTile({ big, label, back, index }) {
+  const [flip, setFlip] = shS(false);
+  return (
+    <button type="button" className="tg-login-tile" data-flip={flip ? "1" : "0"} aria-pressed={flip} onClick={() => setFlip((v) => !v)} style={{ "--i": index }}>
+      <span className="tg-login-tile-in">
+        <span className="tg-login-tile-face tg-login-tile-front"><strong>{big}</strong><span>{label}</span></span>
+        <span className="tg-login-tile-face tg-login-tile-back">{back}</span>
+      </span>
+    </button>
+  );
+}
+
+// After a successful login App swaps Login for the dashboard immediately. To finish the
+// "charged" moment without slowing anything down, the last frame of the page (and the live
+// canvas) is moved into a fixed overlay that flares, pushes into the light and fades out (≤1.5 s).
+function runLoginAfterglow(root, scene, reduced) {
+  const clone = root.cloneNode(true);
+  clone.classList.add("tg-login-afterglow");
+  clone.setAttribute("aria-hidden", "true");
+  clone.setAttribute("inert", "");
+  clone.setAttribute("data-phase", "success");
+  clone.removeAttribute("data-gloom");
+  clone.removeAttribute("data-pw");
+  clone.querySelectorAll("input").forEach((inp) => {
+    if (inp.type === "password" || inp.dataset.secret) { const mask = "*".repeat(inp.value.length); inp.setAttribute("value", mask); inp.value = mask; inp.type = "password"; }
+    inp.removeAttribute("autocomplete"); inp.removeAttribute("name"); inp.tabIndex = -1;
+  });
+  clone.querySelectorAll("button").forEach((b) => { b.tabIndex = -1; });
+  const stage = clone.querySelector(".tg-login-stage");
+  if (stage) stage.replaceChildren(...(scene && scene.canvas ? [scene.canvas] : []));
+  document.body.appendChild(clone);
+  if (scene) scene.success();
+  setTimeout(() => clone.classList.add("is-leaving"), reduced ? 250 : 1000);
+  setTimeout(() => { if (scene) scene.dispose(); clone.remove(); }, reduced ? 650 : 1500);
+}
+
 function Login() {
   const { login, dataLoading, t } = useApp();
   const [username, setUsername] = shS("");
   const [pw, setPw] = shS("");
   const [showPw, setShowPw] = shS(false);
   const [error, setError] = shS("");
+  const [phase, setPhase] = shS("idle"); // idle | submitting | error
+  const [gloom, setGloom] = shS(false);
+  const [pwFocus, setPwFocus] = shS(false);
+  const [scene3d, setScene3d] = shS(false);
+  const [anchor, setAnchor] = shS(null);
+  const isMobile = useLoginMedia(LOGIN_MOBILE_MQ);
+  const reduced = useLoginMedia(LOGIN_REDUCED_MQ);
+  const theme = useDocTheme();
+  const rootRef = shR(null), stageRef = shR(null), cardRef = shR(null), cardWrapRef = shR(null), ringRef = shR(null);
+  const svgRef = shR(null), pulseRef = shR(null), sceneRef = shR(null), phaseRef = shR("idle");
+  const handedOffRef = shR(false), reducedRef = shR(reduced), timersRef = shR([]), moodRef = shR({ cloud: 0, dim: 0 });
+  reducedRef.current = reduced;
+
+  const later = (fn, ms) => { const id = setTimeout(fn, ms); timersRef.current.push(id); };
+  shE(() => () => timersRef.current.forEach(clearTimeout), []);
+
+  // Where the energy cable meets the card (bottom centre), in stage pixels.
+  const getAnchor = shCB(() => {
+    const stage = stageRef.current, card = cardRef.current;
+    if (!stage || !card) return null;
+    const s = stage.getBoundingClientRect(), c = card.getBoundingClientRect();
+    return { x: c.left + c.width / 2 - s.left, y: Math.min(s.height - 2, c.bottom - s.top - 1) };
+  }, []);
+
+  const flashRing = shCB(() => {
+    const ring = ringRef.current;
+    if (!ring || !ring.animate || reducedRef.current) return;
+    ring.animate([{ filter: "brightness(2.1) saturate(1.2)" }, { filter: "brightness(1)" }], { duration: 700, easing: "ease-out" });
+  }, []);
+
+  const setSun = shCB((x, y) => {
+    const root = rootRef.current;
+    if (!root) return;
+    root.style.setProperty("--sun-x", `${x.toFixed(1)}%`);
+    root.style.setProperty("--sun-y", `${y.toFixed(1)}%`);
+  }, []);
+
+  // SVG scene: route the energy line to the card and expose the sun position for the flare.
+  shE(() => {
+    if (scene3d) return undefined;
+    const measure = () => {
+      const svg = svgRef.current, card = cardRef.current;
+      if (!svg || !svg.getScreenCTM) return;
+      const m = svg.getScreenCTM();
+      if (!m) return;
+      const inv = m.inverse();
+      const sunEl = svg.querySelector(".tg-ss-sun-disc");
+      if (sunEl) {
+        const p = new DOMPoint(+sunEl.getAttribute("cx"), +sunEl.getAttribute("cy")).matrixTransform(m);
+        const r = rootRef.current && rootRef.current.getBoundingClientRect();
+        if (r) setSun(((p.x - r.left) / r.width) * 100, ((p.y - r.top) / Math.max(1, r.height)) * 100);
+      }
+      if (isMobile || !card) { setAnchor(null); return; }
+      const c = card.getBoundingClientRect();
+      const p = new DOMPoint(c.left + c.width / 2, Math.min(window.innerHeight - 2, c.bottom - 1)).matrixTransform(inv);
+      setAnchor((a) => (a && Math.abs(a.x - p.x) < 1 && Math.abs(a.y - p.y) < 1 ? a : { x: p.x, y: p.y }));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    rootRef.current && ro.observe(rootRef.current);
+    cardRef.current && ro.observe(cardRef.current);
+    window.addEventListener("resize", measure);
+    return () => { ro.disconnect(); window.removeEventListener("resize", measure); };
+  }, [isMobile, scene3d, setSun]);
+
+  // Lazy 3D scene (desktop, capable GPU). Starts after the form is on screen.
+  shE(() => {
+    if (isMobile) return undefined;
+    let cancelled = false, api = null, idle = 0;
+    const kick = () => {
+      if (cancelled || !loginCan3D()) return;
+      import("/src/login-scene.js").then((mod) => {
+        if (cancelled || !stageRef.current) return;
+        try {
+          api = mod.createSolarScene(stageRef.current, {
+            theme: document.documentElement.getAttribute("data-theme"),
+            still: reducedRef.current,
+            getAnchor,
+            onArrive: flashRing,
+            onSun: setSun,
+            onLowFps: () => {
+              if (cancelled || handedOffRef.current) return;
+              if (sceneRef.current === api) sceneRef.current = null;
+              api.dispose(); api = null;
+              setScene3d(false);
+            },
+          });
+        } catch { api = null; return; }
+        sceneRef.current = api;
+        api.setMood(moodRef.current);
+        // reveal on the next frame so the canvas has drawn once
+        requestAnimationFrame(() => { if (!cancelled) setScene3d(true); });
+      }).catch(() => {});
+    };
+    idle = window.requestIdleCallback ? window.requestIdleCallback(kick, { timeout: 400 }) : setTimeout(kick, 60);
+    return () => {
+      cancelled = true;
+      window.cancelIdleCallback ? window.cancelIdleCallback(idle) : clearTimeout(idle);
+      if (sceneRef.current === api) sceneRef.current = null;
+      if (api && !handedOffRef.current) api.dispose();
+      setScene3d(false);
+    };
+  }, [isMobile, reduced, getAnchor, flashRing, setSun]);
+
+  shE(() => { sceneRef.current && sceneRef.current.setTheme(theme); }, [theme, scene3d]);
+
+  // Password focus: a soft cloud drifts over the sun and the field dims ("secret" mood).
+  shE(() => {
+    moodRef.current = pwFocus ? { cloud: 0.9, dim: 0.22 } : { cloud: 0, dim: 0 };
+    if (!gloom && sceneRef.current) sceneRef.current.setMood(moodRef.current);
+  }, [pwFocus, gloom, scene3d]);
+
+  shE(() => { sceneRef.current && sceneRef.current.refreshAnchor(); }, [error, scene3d]);
+
+  // Card tilts 3–4° toward the cursor; a light glint follows the pointer along its edge.
+  shE(() => {
+    if (isMobile || reduced) return undefined;
+    let raf = 0, ev = null;
+    const apply = () => {
+      raf = 0;
+      const card = cardRef.current;
+      if (!card || !ev) return;
+      const r = card.getBoundingClientRect();
+      const dx = ev.clientX - (r.left + r.width / 2), dy = ev.clientY - (r.top + r.height / 2);
+      const nx = Math.max(-1, Math.min(1, dx / (window.innerWidth * 0.5)));
+      const ny = Math.max(-1, Math.min(1, dy / (window.innerHeight * 0.5)));
+      card.style.setProperty("--tilt-y", `${(nx * 3.6).toFixed(2)}deg`);
+      card.style.setProperty("--tilt-x", `${(-ny * 3.2).toFixed(2)}deg`);
+      card.style.setProperty("--sweep", `${((Math.atan2(dy, dx) * 180) / Math.PI + 90).toFixed(1)}deg`);
+    };
+    const onMove = (e) => { ev = e; if (!raf) raf = requestAnimationFrame(apply); };
+    window.addEventListener("pointermove", onMove, { passive: true });
+    return () => { window.removeEventListener("pointermove", onMove); cancelAnimationFrame(raf); };
+  }, [isMobile, reduced]);
+
+  // Successful login unmounts this component: hand the scene to the afterglow overlay.
+  shLE(() => () => {
+    if (phaseRef.current !== "submitting" || !rootRef.current) return;
+    handedOffRef.current = true;
+    runLoginAfterglow(rootRef.current, sceneRef.current, reducedRef.current);
+  }, []);
+
+  const emitPulse = () => {
+    if (sceneRef.current) sceneRef.current.pulse();
+    else if (pulseRef.current && pulseRef.current.beginElement && !reducedRef.current) { try { pulseRef.current.beginElement(); } catch { /* SMIL unsupported */ } }
+    flashRing();
+  };
+
   const submit = async (e) => {
     e && e.preventDefault();
     setError("");
+    phaseRef.current = "submitting";
+    setPhase("submitting");
+    sceneRef.current && sceneRef.current.setSubmitting(true);
     try {
       await login(username, pw);
     } catch (err) {
       setError(err?.message || t("auth.loginError"));
+      phaseRef.current = "error";
+      setPhase("error");
+      setGloom(true);
+      sceneRef.current && sceneRef.current.error();
+      const wrap = cardWrapRef.current;
+      if (wrap && wrap.animate && !reducedRef.current) {
+        wrap.animate([
+          { transform: "translateX(0)" }, { transform: "translateX(-14px)" }, { transform: "translateX(11px)" },
+          { transform: "translateX(-7px)" }, { transform: "translateX(4px)" }, { transform: "translateX(0)" },
+        ], { duration: 520, easing: "cubic-bezier(.36,.07,.19,.97)" });
+      }
+      later(() => setGloom(false), 1300);
+      later(() => { if (phaseRef.current === "error") { phaseRef.current = "idle"; setPhase("idle"); } }, 1400);
+    } finally {
+      sceneRef.current && sceneRef.current.setSubmitting(false);
     }
   };
+
+  const busy = dataLoading || phase === "submitting";
+  const chars = username.length + pw.length;
+  const charge = Math.min(0.92, 0.08 + chars * 0.05);
+  const title = t("auth.heroTitle").split(" ");
+
   return (
-    <div className="tg-login">
-      <div className="tg-login-art">
-        <div className="tg-login-art-inner">
-          <Logo />
-          <h1>{t("auth.heroTitle")}</h1>
-          <p>{t("auth.heroText")}</p>
-          <div className="tg-login-stats">
-            <div><strong>CRM</strong><span>{t("auth.statCrm")}</span></div>
-            <div><strong>AI</strong><span>{t("auth.statAi")}</span></div>
-            <div><strong>1</strong><span>{t("auth.statFinance")}</span></div>
+    <div ref={rootRef} className="tg-login" data-phase={phase} data-scene={isMobile ? "lite" : scene3d ? "3d" : "svg"}
+      data-reduced={reduced ? "1" : undefined} data-pw={pwFocus ? "1" : undefined} data-gloom={gloom ? "1" : undefined}
+      style={{ "--charge": charge }}>
+      <div className="tg-login-scene" aria-hidden="true">
+        <SolarField lite={isMobile} anchor={isMobile ? null : anchor} svgRef={svgRef} pulseRef={pulseRef} />
+        <div className="tg-login-stage" ref={stageRef} />
+        <div className="tg-login-veil" />
+        <div className="tg-login-flash" />
+      </div>
+
+      <div className="tg-login-layout">
+        <section className="tg-login-hero">
+          <div className="tg-login-brand"><Logo /></div>
+          <p className="tg-login-kicker tg-intro">{t("auth.kicker")}</p>
+          <h1 className="tg-login-title">
+            {title.map((w, i) => <React.Fragment key={i}><span className="tg-login-word tg-intro" style={{ "--i": i }}>{w}</span>{i < title.length - 1 ? " " : ""}</React.Fragment>)}
+          </h1>
+          <p className="tg-login-lead tg-intro">{t("auth.heroText")}</p>
+        </section>
+
+        <div className="tg-login-cardwrap" ref={cardWrapRef}>
+          <div className="tg-login-card" ref={cardRef}>
+            <span className="tg-login-ring" ref={ringRef} aria-hidden="true" />
+            <span className="tg-login-edge" aria-hidden="true" />
+            <span className="tg-login-plug" aria-hidden="true" />
+            <form onSubmit={submit} aria-busy={busy}>
+              <div className="tg-login-cardhead">
+                <div>
+                  <h2>{t("auth.loginTitle")}</h2>
+                  <p className="tg-login-sub">{t("auth.loginSubtitle")}</p>
+                </div>
+                <div className="tg-login-battery" aria-hidden="true">
+                  <span className="tg-login-battery-body"><span className="tg-login-battery-fill" /><I.zap size={11} /></span>
+                  <span className="tg-login-battery-cap" />
+                </div>
+              </div>
+              <Field label={t("common.username")}><Input value={username} onChange={e => { if (e.target.value.length > username.length) emitPulse(); setUsername(e.target.value); setError(""); }} autoComplete="username" /></Field>
+              <div style={{ height: 14 }} />
+              <Field label={t("common.password")}>
+                <div style={{ position: "relative" }}>
+                  <input className="tg-input" value={pw} data-secret="1" onChange={e => { if (e.target.value.length > pw.length) emitPulse(); setPw(e.target.value); setError(""); }} onFocus={() => setPwFocus(true)} onBlur={() => setPwFocus(false)} type={showPw ? "text" : "password"} autoComplete="current-password" style={{ paddingRight: 40, width: "100%", boxSizing: "border-box" }} />
+                  <button type="button" className="tg-login-eye" onClick={() => setShowPw(v => !v)} aria-label={showPw ? t("auth.hidePassword") : t("auth.showPassword")} aria-pressed={showPw}>
+                    {showPw ? <I.eyeOff size={16} /> : <I.eye size={16} />}
+                  </button>
+                </div>
+              </Field>
+              {error && (
+                <div className="tg-login-error" role="alert" style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, padding: "10px 14px", borderRadius: 8, background: "var(--red-bg)", border: "1px solid var(--red)", color: "var(--red)", fontSize: 13 }}>
+                  <I.alert size={15} style={{ flexShrink: 0 }} />
+                  <span>{error}</span>
+                </div>
+              )}
+              <div style={{ height: 20 }} />
+              <Button variant="primary" size="lg" full type="submit" disabled={dataLoading}>{dataLoading ? t("common.loading") : <>{t("common.login")} <I.arrowRight size={17} /></>}</Button>
+            </form>
           </div>
         </div>
-        <div className="tg-login-glow" />
-      </div>
-      <div className="tg-login-form">
-        <form onSubmit={submit}>
-          <h2>{t("auth.loginTitle")}</h2>
-          <Field label={t("common.username")}><Input value={username} onChange={e => { setUsername(e.target.value); setError(""); }} autoComplete="username" /></Field>
-          <div style={{ height: 14 }} />
-          <Field label={t("common.password")}>
-            <div style={{ position: "relative" }}>
-              <input className="tg-input" value={pw} onChange={e => { setPw(e.target.value); setError(""); }} type={showPw ? "text" : "password"} autoComplete="current-password" style={{ paddingRight: 40, width: "100%", boxSizing: "border-box" }} />
-              <button type="button" onClick={() => setShowPw(v => !v)} style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "var(--text-3)", display: "flex", alignItems: "center", padding: 0, lineHeight: 1 }}>
-                {showPw ? <I.eyeOff size={16} /> : <I.eye size={16} />}
-              </button>
-            </div>
-          </Field>
-          {error && (
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, padding: "10px 14px", borderRadius: 8, background: "var(--red-bg)", border: "1px solid var(--red)", color: "var(--red)", fontSize: 13 }}>
-              <I.alert size={15} style={{ flexShrink: 0 }} />
-              <span>{error}</span>
-            </div>
-          )}
-          <div style={{ height: 20 }} />
-          <Button variant="primary" size="lg" full type="submit" disabled={dataLoading}>{dataLoading ? t("common.loading") : <>{t("common.login")} <I.arrowRight size={17} /></>}</Button>
-        </form>
+        <div className="tg-login-tiles">
+          <LoginTile index={0} big="CRM" label={t("auth.statCrm")} back={t("auth.statCrmBack")} />
+          <LoginTile index={1} big="AI" label={t("auth.statAi")} back={t("auth.statAiBack")} />
+          <LoginTile index={2} big="1" label={t("auth.statFinance")} back={t("auth.statFinanceBack")} />
+        </div>
       </div>
     </div>
   );
