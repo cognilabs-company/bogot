@@ -1105,13 +1105,20 @@ function Toasts() {
 }
 
 // ---------- Login ----------
-// ---------- Login: "Quyosh fermasi" (solar farm at sunrise) ----------
-// The form is plain DOM and usable instantly. Behind it: an SVG solar farm (first paint, mobile,
-// reduced-motion and no-WebGL fallback) and, on capable desktops, a lazily imported three.js scene
-// (src/login-scene.js) that fades in over it. Everything in the scene layer is aria-hidden.
+// ---------- Login: "Quyosh sizning qo'lingizda" (the sun follows your hand) ----------
+// The form is plain DOM and usable instantly. Behind it a floating hex island with a honeycomb of solar
+// trackers hovers in the void; the sun follows the pointer and every panel turns to face it. On capable
+// devices this is a lazily imported three.js scene (src/login-scene.js); the SVG version of the same art
+// (SunArt below) covers no-WebGL, weak devices, low FPS and slow loads. Everything in the scene layer is
+// aria-hidden.
 const { useLayoutEffect: shLE, useCallback: shCB } = React;
+const LOGIN_STACK_MQ = "(max-width: 959px), (max-height: 619px)";
 const LOGIN_MOBILE_MQ = "(max-width: 767px)";
 const LOGIN_REDUCED_MQ = "(prefers-reduced-motion: reduce)";
+const LOGIN_TOUCH_MQ = "(hover: none) and (pointer: coarse)";
+const LOGIN_HEX_D = 1.08, LOGIN_PIVOT = 0.66, LOGIN_SUN_R = 0.95, LOGIN_SUN_Z = 2.6;
+const lgClamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const lgDamp = (cur, target, lambda, dt) => cur + (target - cur) * (1 - Math.exp(-lambda * dt));
 
 function useLoginMedia(query) {
   const get = () => !!(window.matchMedia && window.matchMedia(query).matches);
@@ -1139,13 +1146,13 @@ function useDocTheme() {
   return theme;
 }
 
-// WebGL present and the device is not obviously weak (few cores, little memory, software GL).
+// WebGL2 present and the device is not obviously weak (few cores, little memory, software GL).
 function loginCan3D() {
   try {
     if (navigator.hardwareConcurrency && navigator.hardwareConcurrency < 4) return false;
     if (navigator.deviceMemory && navigator.deviceMemory < 4) return false;
     const c = document.createElement("canvas");
-    const gl = c.getContext("webgl2") || c.getContext("webgl");
+    const gl = c.getContext("webgl2");
     if (!gl) return false;
     const info = gl.getExtension("WEBGL_debug_renderer_info");
     const name = String(info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER) || "");
@@ -1155,152 +1162,233 @@ function loginCan3D() {
   } catch { return false; }
 }
 
-// Perspective solar field for the SVG scene: a pinhole camera 3 m above the ground.
-function solarFieldGeometry(lite) {
-  const W = lite ? 420 : 1600, Hh = lite ? 280 : 900;
-  const y0 = lite ? 150 : 330, cx = W / 2, f = lite ? 300 : 900, cam = lite ? 3 : 6.6;
-  const P = (x, y, d) => [cx + (f * x) / d, y0 + (f * (cam - y)) / d];
-  const pt = ([x, y]) => `${x.toFixed(1)} ${y.toFixed(1)}`;
-  const rowsN = lite ? 6 : 12;
-  const rows = [];
-  for (let r = rowsN - 1; r >= 0; r--) {
-    const d = lite ? 4.2 + r * 4.6 : 9.5 + r * 7.6;
-    const df = d - 1.5, db = d + 1.5, yf = 0.42, yb = 1.62;
-    const half = Math.min(60, ((W / 2) * db) / f + 1.2);
-    const poly = [P(-half, yf, df), P(half, yf, df), P(half, yb, db), P(-half, yb, db)].map(pt).join(" L ");
-    let lines = "", cells = "", legs = "";
-    const modPx = (f * 1.035) / df;
-    for (let x = -half + 0.5; x < half; x += 1.035) {
-      lines += `M${pt(P(x, yf, df))} L${pt(P(x, yb, db))} `;
-      if (modPx > 26) for (let k = 1; k < 6; k++) { const xx = x + (k * 1.035) / 6; cells += `M${pt(P(xx, yf, df))} L${pt(P(xx, yb, db))} `; }
-    }
-    const rowPx = (f * 1.2) / df;
-    const nCells = rowPx > 50 ? 20 : rowPx > 18 ? 4 : 2;
-    for (let k = 1; k < nCells; k++) {
-      const t = k / nCells, dd = df + (db - df) * t, yy = yf + (yb - yf) * t;
-      (k === nCells / 2 ? (s) => { lines += s; } : (s) => { cells += s; })(`M${pt(P(-half, yy, dd))} L${pt(P(half, yy, dd))} `);
-    }
-    if (df < 26) for (let x = -half; x < half; x += 3.2) { legs += `M${pt(P(x, 0, df + 0.1))} L${pt(P(x, yf, df + 0.1))} M${pt(P(x, 0, db - 0.1))} L${pt(P(x, yb, db - 0.1))} `; }
-    rows.push({ r, poly: `M${poly} Z`, lines, cells, legs, front: P(0, 0, df)[1] });
+// Where the island should sit (stage pixels) and how wide it should be. Shared by the 3D and SVG scenes.
+function loginIslandSpot(sw, sh, card, stacked) {
+  if (stacked) {
+    const size = Math.min(sw * 0.6, sh * 0.78, 420);
+    return { x: sw / 2, y: sh * 0.66, size };
   }
-  const sun = lite ? { x: W * 0.79, y: 108, r: 14 } : { x: W * 0.55, y: 222, r: 22 };
-  const stars = [];
-  let seed = 7;
-  const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
-  for (let i = 0; i < (lite ? 22 : 70); i++) stars.push([rnd() * W, rnd() * y0 * 0.8, 0.5 + rnd() * (lite ? 0.8 : 1.3), rnd() * 4]);
-  const photons = [];
-  for (let i = 0; i < (lite ? 6 : 12); i++) {
-    const row = rows[rows.length - 1 - Math.floor(rnd() * Math.min(5, rows.length))];
-    const tx = (rnd() - 0.5) * W * 0.8 + W / 2;
-    photons.push({ dx: tx - sun.x, dy: row.front - 30 - sun.y - rnd() * 40, delay: (1.3 + rnd() * 3).toFixed(2), dur: (2.2 + rnd() * 1.4).toFixed(2) });
-  }
-  return { W, Hh, y0, rows, sun, stars, photons };
+  const right = card ? card.left : sw * 0.62;
+  const size = lgClamp(Math.min(right * 0.78, sh * 0.62), 280, 800);
+  return { x: right * 0.53, y: sh * 0.625, size };
 }
 
-function SolarField({ lite, anchor, svgRef, pulseRef }) {
-  const g = shM(() => solarFieldGeometry(lite), [lite]);
-  const id = lite ? "tgsl" : "tgsf";
-  const end = anchor || { x: g.W / 2, y: g.Hh + 4 };
-  const sx = g.sun.x, start = lite ? { x: sx, y: g.y0 + 26 } : { x: end.x * 0.7 + g.W * 0.15, y: g.Hh + 20 };
-  const energyPath = `M${start.x.toFixed(1)} ${start.y.toFixed(1)} C ${start.x.toFixed(1)} ${(start.y + (end.y - start.y) * 0.55).toFixed(1)}, ${end.x.toFixed(1)} ${(end.y - (end.y - start.y) * 0.45).toFixed(1)}, ${end.x.toFixed(1)} ${end.y.toFixed(1)}`;
+// Honeycomb cells (same layout as the 3D scene): axial coordinates, centre = tower, one cell = transformer.
+function loginCells(rings) {
+  const out = [];
+  for (let q = -rings; q <= rings; q++) {
+    for (let r = Math.max(-rings, -q - rings); r <= Math.min(rings, -q + rings); r++) {
+      if ((q === 0 && r === 0) || (q === -1 && r === 1)) continue;
+      out.push({ x: LOGIN_HEX_D * (q + r / 2), z: LOGIN_HEX_D * (r * Math.sqrt(3) / 2) });
+    }
+  }
+  return out;
+}
+
+// Panel orientation that faces a target point (world units), within tracker limits.
+function loginPanelAim(p, tx, ty, tz, mode) {
+  let dx = tx - p.x, dy = ty - LOGIN_PIVOT, dz = tz - p.z;
+  const l = Math.hypot(dx, dy, dz) || 1; dx /= l; dy /= l; dz /= l;
+  let roll = Math.atan2(-dx, Math.max(0.05, dy));
+  let pitch = Math.atan2(dz, Math.max(0.05, Math.hypot(dx, dy)));
+  if (mode === "droop") { roll = -roll * 0.7 + (p.x > 0 ? 0.9 : -0.9); pitch = -0.55; }
+  return [lgClamp(roll, -1.12, 1.12), lgClamp(pitch, -0.6, 0.85)];
+}
+
+// Pseudo-3D projection for the SVG version (orthographic, camera ~30° above the horizon).
+function sunArtModel(w, h, spot, lite) {
+  const rings = lite ? 2 : 3;
+  const RW = (rings * LOGIN_HEX_D + 0.62) / 0.866 + 0.28;
+  const u = spot.size / (2 * (RW + 0.3));
+  const cx = spot.x, cy = spot.y, KY = 0.5, KH = 0.86;
+  const P = (x, y, z) => [cx + x * u, cy + z * u * KY - y * u * KH];
+  const pts = (arr) => arr.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+  const ring = (r, y, rot = 0) => Array.from({ length: 6 }, (_, k) => { const a = rot + (k * Math.PI) / 3; return P(Math.cos(a) * r, y, Math.sin(a) * r); });
+  const top = ring(RW, 0), lip = ring(RW + 0.12, -0.58);
+  // front side faces (edge midpoints facing the camera: 30°, 90°, 150°)
+  const sides = [0, 1, 2].map((k) => pts([top[k], top[k + 1], lip[k + 1], lip[k]]));
+  let seed = 5;
+  const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  const mid = Array.from({ length: 6 }, (_, k) => { const a = (k * Math.PI) / 3 + (rnd() - 0.5) * 0.3; const r = RW * (0.55 + rnd() * 0.12); return P(Math.cos(a) * r, -2.1 - rnd() * 0.5, Math.sin(a) * r); });
+  const tip = P(0.2, -4.5, 0.4);
+  const rock = [];
+  for (let k = 0; k <= 3; k++) {
+    const a = k % 6, b = (k + 1) % 6;
+    if (k < 3) rock.push({ d: pts([lip[a], lip[b], mid[b], mid[a]]), s: k });
+    rock.push({ d: pts([mid[a], mid[b], tip]), s: k + 3 });
+  }
+  const veinsRock = [0.15, 0.45, 0.75, 0.32, 0.62].map((f, i) => {
+    const a = Math.PI * (0.12 + f * 0.76);
+    let x = Math.cos(a) * RW, z = Math.sin(a) * RW, y = -0.6;
+    let d = `M${P(x, y, z).map((v) => v.toFixed(1)).join(" ")}`;
+    for (let s = 0; s < 5; s++) { x *= 0.78; z *= 0.78; y -= 0.65 + rnd() * 0.25; x += (rnd() - 0.5) * 0.5; d += ` L${P(x, y, z).map((v) => v.toFixed(1)).join(" ")}`; }
+    return { d, i };
+  });
+  const cells = loginCells(rings);
+  const panels = cells.map((c, i) => {
+    const [bx, by] = P(c.x, 0, c.z), [px, py] = P(c.x, LOGIN_PIVOT, c.z);
+    return { i, x: c.x, z: c.z, bx, by, px, py, ord: Math.hypot(c.x, c.z) };
+  }).sort((a, b) => a.z - b.z || a.x - b.x);
+  const ords = panels.slice().sort((a, b) => a.ord - b.ord);
+  ords.forEach((p, k) => { p.k = k; });
+  const PR = 0.455 * u;
+  const hexLocal = (r) => Array.from({ length: 6 }, (_, k) => { const a = Math.PI / 6 + (k * Math.PI) / 3; return [Math.cos(a) * r, Math.sin(a) * r]; });
+  const [tx, ty] = P(0, 0, 0), [ttx, tty] = P(0, 2.88, 0);
+  const tr = P(-0.54, 0, 0.935);
+  return {
+    u, cx, cy, P, KY, KH, RW, top: pts(top), topPts: top, sides, rock, veinsRock, panels,
+    plate: pts(hexLocal(PR)), frame: pts(hexLocal(0.5 * u)), PR,
+    tower: { x: tx, y: ty, top: tty, topX: ttx }, transformer: { x: tr[0], y: tr[1] },
+    sunR: LOGIN_SUN_R * u, vb: `0 0 ${Math.round(w)} ${Math.round(h)}`,
+  };
+}
+
+function SunArt({ size, spot, anchor, lite, svgRef }) {
+  const w = Math.max(1, size.w), h = Math.max(1, size.h);
+  const m = shM(() => sunArtModel(w, h, spot, lite), [w, h, spot.x, spot.y, spot.size, lite]);
+  const id = lite ? "tgsal" : "tgsa";
+  const stars = shM(() => {
+    let s = 3; const r = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
+    return Array.from({ length: lite ? 24 : 70 }, () => [r() * w, r() * h * 0.8, 0.5 + r() * 1.1, r() * 4]);
+  }, [w, h, lite]);
+  const dust = shM(() => {
+    let s = 9; const r = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
+    return Array.from({ length: lite ? 14 : 34 }, () => [m.cx + (r() - 0.5) * m.u * 16, m.cy - r() * m.u * 7, 0.8 + r() * 1.6, r() * 6, 5 + r() * 6]);
+  }, [m, lite]);
+  const tt = m.tower, r = m.sunR;
+  const ribbon = anchor ? (() => {
+    const x0 = tt.topX, y0 = tt.top, x1 = anchor.x, y1 = anchor.y, lift = Math.min(y0, y1) - m.u * 1.6;
+    return `M${x0.toFixed(1)} ${y0.toFixed(1)} C ${(x0 + (x1 - x0) * 0.2).toFixed(1)} ${lift.toFixed(1)}, ${(x0 + (x1 - x0) * 0.7).toFixed(1)} ${lift.toFixed(1)}, ${x1.toFixed(1)} ${y1.toFixed(1)}`;
+  })() : null;
   return (
-    <svg ref={svgRef} className="tg-ss" viewBox={`0 0 ${g.W} ${g.Hh}`} preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">
+    <svg ref={svgRef} className="tg-sa" viewBox={m.vb} preserveAspectRatio="none" aria-hidden="true" focusable="false">
       <defs>
         <linearGradient id={`${id}-sky`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" style={{ stopColor: "var(--ss-top)" }} />
-          <stop offset=".62" style={{ stopColor: "var(--ss-mid)" }} />
-          <stop offset="1" style={{ stopColor: "var(--ss-horizon)" }} />
+          <stop offset="0" style={{ stopColor: "var(--sa-top)" }} /><stop offset=".55" style={{ stopColor: "var(--sa-mid)" }} /><stop offset="1" style={{ stopColor: "var(--sa-low)" }} />
         </linearGradient>
-        <linearGradient id={`${id}-ground`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" style={{ stopColor: "var(--ss-ground-far)" }} />
-          <stop offset="1" style={{ stopColor: "var(--ss-ground)" }} />
-        </linearGradient>
-        <linearGradient id={`${id}-panel`} x1="0" y1="1" x2="0" y2="0">
-          <stop offset="0" style={{ stopColor: "var(--ss-cell)" }} />
-          <stop offset=".7" style={{ stopColor: "var(--ss-cell-2)" }} />
-          <stop offset="1" style={{ stopColor: "var(--ss-cell-sky)" }} />
-        </linearGradient>
-        <radialGradient id={`${id}-glow`} cx={sx} cy={g.sun.y} r={g.sun.r * 9} gradientUnits="userSpaceOnUse">
-          <stop offset="0" style={{ stopColor: "var(--ss-sun)", stopOpacity: .9 }} />
-          <stop offset=".25" style={{ stopColor: "var(--ss-sun)", stopOpacity: .35 }} />
-          <stop offset="1" style={{ stopColor: "var(--ss-sun)", stopOpacity: 0 }} />
+        <radialGradient id={`${id}-core`}>
+          <stop offset="0" style={{ stopColor: "var(--sa-sun-core)" }} /><stop offset=".55" style={{ stopColor: "var(--sa-sun-mid)" }} /><stop offset="1" style={{ stopColor: "var(--sa-sun-edge)" }} />
         </radialGradient>
-        <radialGradient id={`${id}-refl`} cx={sx} cy={g.y0 + (g.Hh - g.y0) * 0.35} r={g.Hh * 0.55} gradientUnits="userSpaceOnUse" gradientTransform={`translate(${sx} ${g.y0}) scale(.32 1) translate(${-sx} ${-g.y0})`}>
-          <stop offset="0" style={{ stopColor: "var(--ss-sun)", stopOpacity: .75 }} />
-          <stop offset=".5" style={{ stopColor: "var(--ss-sun)", stopOpacity: .18 }} />
-          <stop offset="1" style={{ stopColor: "var(--ss-sun)", stopOpacity: 0 }} />
+        <radialGradient id={`${id}-corona`}>
+          <stop offset="0" style={{ stopColor: "var(--sa-sun-mid)", stopOpacity: 0.9 }} /><stop offset=".22" style={{ stopColor: "var(--sa-sun-edge)", stopOpacity: 0.45 }} />
+          <stop offset=".5" style={{ stopColor: "var(--sa-sun-edge)", stopOpacity: 0.12 }} /><stop offset="1" style={{ stopColor: "var(--sa-sun-edge)", stopOpacity: 0 }} />
         </radialGradient>
-        <linearGradient id={`${id}-sweep`} x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0" stopColor="#fff" stopOpacity="0" />
-          <stop offset=".5" style={{ stopColor: "var(--ss-sun)", stopOpacity: .85 }} />
-          <stop offset="1" stopColor="#fff" stopOpacity="0" />
+        <linearGradient id={`${id}-ray`} x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" style={{ stopColor: "var(--sa-sun-mid)", stopOpacity: 0.55 }} /><stop offset="1" style={{ stopColor: "var(--sa-sun-mid)", stopOpacity: 0 }} />
         </linearGradient>
-        <clipPath id={`${id}-panels`}>{g.rows.map((row) => <path key={row.r} d={row.poly} />)}</clipPath>
-        <filter id={`${id}-blur`} x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation={lite ? 3 : 7} /></filter>
-        <filter id={`${id}-soft`} x="-20%" y="-50%" width="140%" height="200%"><feGaussianBlur stdDeviation={lite ? 2 : 3.5} /></filter>
+        <linearGradient id={`${id}-top`} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" style={{ stopColor: "var(--sa-top-a)" }} /><stop offset="1" style={{ stopColor: "var(--sa-top-b)" }} />
+        </linearGradient>
+        <linearGradient id={`${id}-rock`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" style={{ stopColor: "var(--sa-rock-a)" }} /><stop offset="1" style={{ stopColor: "var(--sa-rock-b)" }} />
+        </linearGradient>
+        <linearGradient id={`${id}-plate`} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" style={{ stopColor: "var(--sa-plate-a)" }} /><stop offset="1" style={{ stopColor: "var(--sa-plate-b)" }} />
+        </linearGradient>
+        <filter id={`${id}-glow`} x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation={lite ? 2 : 3.2} /></filter>
+        <filter id={`${id}-soft`} x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation={lite ? 14 : 34} /></filter>
       </defs>
-      <g className="tg-ss-world">
-        <rect width={g.W} height={g.y0 + 2} fill={`url(#${id}-sky)`} />
-        <g className="tg-ss-stars">{g.stars.map(([x, y, r, d], i) => <circle key={i} cx={x} cy={y} r={r} style={{ animationDelay: `${d}s` }} />)}</g>
-        <g className="tg-ss-sun tg-intro">
-          <circle cx={sx} cy={g.sun.y} r={g.sun.r * 9} fill={`url(#${id}-glow)`} />
-          <circle className="tg-ss-sun-disc" cx={sx} cy={g.sun.y} r={g.sun.r} />
-        </g>
-        <g className="tg-ss-cloud" filter={`url(#${id}-soft)`}>
-          {[[-1.6, .25, 1.5], [-.4, -.2, 1.9], [1, .1, 1.6], [2, .35, 1.1], [.2, .45, 2.2]].map(([dx, dy, r], i) => (
-            <ellipse key={i} cx={sx + dx * g.sun.r * 1.3} cy={g.sun.y + dy * g.sun.r * 1.2} rx={r * g.sun.r * 1.2} ry={r * g.sun.r * 0.75} />
-          ))}
-        </g>
-        <rect y={g.y0} width={g.W} height={g.Hh - g.y0} fill={`url(#${id}-ground)`} />
-        <rect className="tg-ss-haze" y={g.y0 - (lite ? 6 : 16)} width={g.W} height={lite ? 14 : 34} filter={`url(#${id}-blur)`} />
-        {g.rows.map((row, i) => (
-          <g key={row.r} className="tg-ss-row">
-            <path className="tg-ss-legs" d={row.legs} />
-            <path d={row.poly} fill={`url(#${id}-panel)`} />
-            <path className="tg-ss-cells" d={row.cells} />
-            <path className="tg-ss-frame" d={row.lines + row.poly} />
-            <path className="tg-ss-shade tg-intro" d={row.poly} style={{ animationDelay: `${0.35 + i * 0.07}s` }} />
-          </g>
-        ))}
-        <g clipPath={`url(#${id}-panels)`}>
-          <rect className="tg-ss-refl" y={g.y0} width={g.W} height={g.Hh - g.y0} fill={`url(#${id}-refl)`} />
-          <rect className="tg-ss-charge" y={g.y0} width={g.W} height={g.Hh - g.y0} />
-          <rect className="tg-ss-sweep tg-intro" x={-g.W * 0.25} y={g.y0} width={g.W * 0.22} height={g.Hh - g.y0} fill={`url(#${id}-sweep)`} />
-        </g>
-        <path className="tg-ss-energy-glow" d={energyPath} />
-        <path className="tg-ss-energy" d={energyPath} />
-        <g className="tg-ss-photons">
-          {g.photons.map((p, i) => (
-            <circle key={i} cx={sx} cy={g.sun.y} r={lite ? 1.6 : 2.6} style={{ "--dx": `${p.dx.toFixed(0)}px`, "--dy": `${p.dy.toFixed(0)}px`, animationDelay: `${p.delay}s`, animationDuration: `${p.dur}s` }} />
-          ))}
-        </g>
-        <circle className="tg-ss-pulse" r={lite ? 3 : 5} opacity="0">
-          <animateMotion id={`${id}-pulse`} ref={pulseRef} dur="0.9s" begin="indefinite" fill="remove" path={energyPath} />
-          <animate attributeName="opacity" values="1;1;0" dur="0.9s" begin={`${id}-pulse.begin`} fill="remove" />
-        </circle>
-        <circle className="tg-ss-pulse tg-ss-pulse-loop" r={lite ? 2.4 : 4}>
-          <animateMotion dur="2.6s" repeatCount="indefinite" path={energyPath} />
-        </circle>
+      <rect width={w} height={h} fill={`url(#${id}-sky)`} />
+      <g className="tg-sa-nebula" filter={`url(#${id}-soft)`}>
+        <ellipse cx={w * 0.22} cy={h * 0.3} rx={w * 0.2} ry={h * 0.16} /><ellipse cx={w * 0.78} cy={h * 0.18} rx={w * 0.16} ry={h * 0.12} />
       </g>
+      <g className="tg-sa-stars">{stars.map(([x, y, rr, d], i) => <circle key={i} cx={x} cy={y} r={rr} style={{ animationDelay: `${d}s` }} />)}</g>
+
+      {/* the sun (moved by JS) */}
+      <g className="tg-sa-sun" data-sun="1" transform={`translate(${w * 0.62} ${h * 0.2})`}>
+        <g className="tg-sa-sunbody">
+          <circle r={r * 7} fill={`url(#${id}-corona)`} className="tg-sa-corona" />
+          <g className="tg-sa-rays">{Array.from({ length: 12 }, (_, k) => (
+            <path key={k} d={`M0 ${-r * 0.16} L${r * (k % 2 ? 5.2 : 7.6)} 0 L0 ${r * 0.16} Z`} fill={`url(#${id}-ray)`} transform={`rotate(${k * 30 + (k % 3) * 7})`} />
+          ))}</g>
+          <circle r={r * 1.35} className="tg-sa-halo" filter={`url(#${id}-glow)`} />
+          <circle r={r} fill={`url(#${id}-core)`} />
+          <g className="tg-sa-plasma">
+            <circle r={r * 0.72} strokeDasharray={`${r * 0.3} ${r * 0.45}`} /><circle r={r * 0.46} strokeDasharray={`${r * 0.2} ${r * 0.34}`} />
+          </g>
+          <circle className="tg-sa-moon" r={r * 1.04} />
+          <g className="tg-sa-cloud" filter={`url(#${id}-glow)`}>
+            {[[-1.4, 0.2, 1.3], [-0.3, -0.35, 1.7], [0.9, 0, 1.45], [1.8, 0.35, 1.0], [0.1, 0.5, 1.9]].map(([dx, dy, rr], i) => (
+              <ellipse key={i} cx={dx * r} cy={dy * r} rx={rr * r * 1.1} ry={rr * r * 0.72} />
+            ))}
+          </g>
+          <path className="tg-sa-bolt" d={`M${-0.2 * r} ${0.7 * r} L${0.15 * r} ${1.35 * r} L${-0.15 * r} ${1.45 * r} L${0.25 * r} ${2.25 * r}`} />
+        </g>
+        <circle className="tg-sa-shock" r={r * 2} />
+      </g>
+
+      {/* beams of light sun → panels (endpoints updated by JS) */}
+      <g className="tg-sa-beams">{[0, 1, 2, 3].map((k) => <line key={k} data-beam={k} x1="0" y1="0" x2="0" y2="0" />)}</g>
+
+      <g className="tg-sa-island" data-island="1">
+        <g className="tg-sa-islandin">
+          {m.rock.map((f) => <polygon key={f.s} points={f.d} fill={`url(#${id}-rock)`} className={`tg-sa-rock tg-sa-rock-${f.s}`} />)}
+          {m.veinsRock.map((v) => <path key={v.i} d={v.d} className="tg-sa-vein-rock" style={{ animationDelay: `${v.i * -0.7}s` }} />)}
+          {m.sides.map((d, k) => <polygon key={k} points={d} className={`tg-sa-side tg-sa-side-${k}`} />)}
+          <polygon points={m.top} fill={`url(#${id}-top)`} className="tg-sa-top" />
+          <polygon points={m.top} className="tg-sa-rim-glow" filter={`url(#${id}-glow)`} />
+          <polygon points={m.top} className="tg-sa-rim" />
+          <g className="tg-sa-veins">{m.panels.map((p) => <line key={p.i} data-vein={p.i} x1={p.bx} y1={p.by} x2={m.tower.x} y2={m.tower.y} style={{ animationDelay: `${(p.i * 0.37) % 2}s` }} />)}</g>
+          <g className="tg-sa-shadows">{m.panels.map((p) => <ellipse key={p.i} data-shadow={p.i} cx={p.bx} cy={p.by} rx={m.PR * 0.95} ry={m.PR * 0.42} />)}</g>
+          <g className="tg-sa-transformer" transform={`translate(${m.transformer.x} ${m.transformer.y})`}>
+            <rect x={-m.u * 0.3} y={-m.u * 0.42} width={m.u * 0.6} height={m.u * 0.42} rx={m.u * 0.06} />
+            <rect className="tg-sa-led" x={-m.u * 0.2} y={-m.u * 0.3} width={m.u * 0.4} height={Math.max(1.5, m.u * 0.04)} />
+          </g>
+          {m.panels.map((p) => (
+            <React.Fragment key={p.i}>
+              <g className="tg-sa-panel">
+                <line className="tg-sa-pole" x1={p.bx} y1={p.by} x2={p.px} y2={p.py} />
+                <g data-panel={p.i} transform={`translate(${p.px} ${p.py})`}>
+                  <g className="tg-sa-unfold" style={{ "--k": p.k }}>
+                    <polygon points={m.frame} className="tg-sa-frame" />
+                    <polygon points={m.plate} fill={`url(#${id}-plate)`} />
+                    <path className="tg-sa-cells" d={`M${-0.2 * m.u} ${-0.33 * m.u}V${0.33 * m.u}M0 ${-0.42 * m.u}V${0.42 * m.u}M${0.2 * m.u} ${-0.33 * m.u}V${0.33 * m.u}M${-0.37 * m.u} ${-0.15 * m.u}H${0.37 * m.u}M${-0.37 * m.u} ${0.15 * m.u}H${0.37 * m.u}`} />
+                    <polygon points={m.plate} className="tg-sa-glow" data-glow={p.i} />
+                  </g>
+                </g>
+              </g>
+              {p.z < 0.1 && p.z > -0.1 && p.x < 0 && p.x > -1.2 ? (
+                <g className="tg-sa-tower">
+                  <path d={`M${tt.x - m.u * 0.2} ${tt.y} L${tt.topX - m.u * 0.07} ${tt.top} L${tt.topX + m.u * 0.07} ${tt.top} L${tt.x + m.u * 0.2} ${tt.y} Z`} />
+                  {[0.25, 0.47, 0.69].map((f, k) => <ellipse key={k} className="tg-sa-tower-ring" cx={tt.x} cy={tt.y + (tt.top - tt.y) * f} rx={m.u * (0.26 - k * 0.04)} ry={m.u * (0.1 - k * 0.015)} />)}
+                  <circle className="tg-sa-tower-glow" cx={tt.topX} cy={tt.top} r={m.u * 0.55} filter={`url(#${id}-glow)`} />
+                  <circle className="tg-sa-tower-orb" cx={tt.topX} cy={tt.top} r={m.u * 0.2} />
+                </g>
+              ) : null}
+            </React.Fragment>
+          ))}
+        </g>
+      </g>
+
+      {ribbon && <>
+        <path className="tg-sa-ribbon-glow" d={ribbon} />
+        <path className="tg-sa-ribbon" d={ribbon} />
+        <circle className="tg-sa-ribbon-pulse" r={lite ? 2.5 : 4}><animateMotion dur="2.2s" repeatCount="indefinite" path={ribbon} /></circle>
+      </>}
+      <g className="tg-sa-dust">{dust.map(([x, y, rr, d, dur], i) => <circle key={i} cx={x} cy={y} r={rr} style={{ animationDelay: `${-d}s`, animationDuration: `${dur}s` }} />)}</g>
     </svg>
   );
 }
 
-function LoginTile({ big, label, back, index }) {
+// Hex chip that flips to a short description (hover / tap / Enter / Space).
+function LoginTile({ big, label, back, index, pos }) {
   const [flip, setFlip] = shS(false);
+  const style = { "--i": index };
+  if (pos) { style["--tx"] = `${pos.x.toFixed(1)}px`; style["--ty"] = `${pos.y.toFixed(1)}px`; }
   return (
-    <button type="button" className="tg-login-tile" data-flip={flip ? "1" : "0"} aria-pressed={flip} onClick={() => setFlip((v) => !v)} style={{ "--i": index }}>
+    <button type="button" className="tg-login-tile" data-flip={flip ? "1" : "0"} aria-pressed={flip} onClick={() => setFlip((v) => !v)} style={style}>
       <span className="tg-login-tile-in">
         <span className="tg-login-tile-face tg-login-tile-front"><strong>{big}</strong><span>{label}</span></span>
-        <span className="tg-login-tile-face tg-login-tile-back">{back}</span>
+        <span className="tg-login-tile-face tg-login-tile-back"><span>{back}</span></span>
       </span>
     </button>
   );
 }
 
-// After a successful login App swaps Login for the dashboard immediately. To finish the
-// "charged" moment without slowing anything down, the last frame of the page (and the live
-// canvas) is moved into a fixed overlay that flares, pushes into the light and fades out (≤1.5 s).
+// After a successful login App swaps Login for the dashboard immediately. To finish the supernova
+// without slowing anything down, the last frame of the page (and the live canvas) moves into a fixed
+// overlay: the sun flares white, a shockwave runs through the island and the card, then it dissolves
+// (≤1.5 s, removed from the DOM).
 function runLoginAfterglow(root, scene, reduced) {
   const clone = root.cloneNode(true);
   clone.classList.add("tg-login-afterglow");
@@ -1311,15 +1399,17 @@ function runLoginAfterglow(root, scene, reduced) {
   clone.removeAttribute("data-pw");
   clone.querySelectorAll("input").forEach((inp) => {
     if (inp.type === "password" || inp.dataset.secret) { const mask = "*".repeat(inp.value.length); inp.setAttribute("value", mask); inp.value = mask; inp.type = "password"; }
-    inp.removeAttribute("autocomplete"); inp.removeAttribute("name"); inp.tabIndex = -1;
+    inp.removeAttribute("autocomplete"); inp.removeAttribute("name"); inp.removeAttribute("id"); inp.tabIndex = -1;
   });
   clone.querySelectorAll("button").forEach((b) => { b.tabIndex = -1; });
+  const pct = clone.querySelector(".tg-login-meter-pct");
+  if (pct) pct.textContent = "100%";
   const stage = clone.querySelector(".tg-login-stage");
-  if (stage) stage.replaceChildren(...(scene && scene.canvas ? [scene.canvas] : []));
+  if (stage) stage.replaceChildren();
   document.body.appendChild(clone);
-  if (scene) scene.success();
-  setTimeout(() => clone.classList.add("is-leaving"), reduced ? 250 : 1000);
-  setTimeout(() => { if (scene) scene.dispose(); clone.remove(); }, reduced ? 650 : 1500);
+  if (scene) { if (stage && scene.adopt) scene.adopt(stage); scene.success(); }
+  setTimeout(() => clone.classList.add("is-leaving"), reduced ? 250 : 880);
+  setTimeout(() => { if (scene) scene.dispose(); clone.remove(); }, reduced ? 650 : 1380);
 }
 
 function Login() {
@@ -1331,137 +1421,278 @@ function Login() {
   const [phase, setPhase] = shS("idle"); // idle | submitting | error
   const [gloom, setGloom] = shS(false);
   const [pwFocus, setPwFocus] = shS(false);
-  const [scene3d, setScene3d] = shS(false);
-  const [anchor, setAnchor] = shS(null);
+  const [can3d] = shS(loginCan3D);
+  const [mode, setMode] = shS(() => (can3d ? "pending" : "svg")); // pending | 3d | svg
+  const [skipIntro, setSkipIntro] = shS(false);
+  const [sunlit, setSunlit] = shS(0);
+  const [geo, setGeo] = shS({ w: window.innerWidth, h: window.innerHeight, spot: { x: window.innerWidth * 0.35, y: window.innerHeight * 0.66, size: 520 }, anchor: null });
+  const stacked = useLoginMedia(LOGIN_STACK_MQ);
   const isMobile = useLoginMedia(LOGIN_MOBILE_MQ);
   const reduced = useLoginMedia(LOGIN_REDUCED_MQ);
+  const touch = useLoginMedia(LOGIN_TOUCH_MQ);
   const theme = useDocTheme();
-  const rootRef = shR(null), stageRef = shR(null), cardRef = shR(null), cardWrapRef = shR(null), ringRef = shR(null);
-  const svgRef = shR(null), pulseRef = shR(null), sceneRef = shR(null), phaseRef = shR("idle");
-  const handedOffRef = shR(false), reducedRef = shR(reduced), timersRef = shR([]), moodRef = shR({ cloud: 0, dim: 0 });
+  const rootRef = shR(null), stageRef = shR(null), cardRef = shR(null), cardWrapRef = shR(null), ringRef = shR(null), fxRef = shR(null);
+  const svgRef = shR(null), sceneRef = shR(null), phaseRef = shR("idle"), mountedRef = shR(true);
+  const handedOffRef = shR(false), reducedRef = shR(reduced), timersRef = shR([]), moodRef = shR({ eclipse: 0 });
+  const geoRef = shR(geo), rectsRef = shR({ stage: null, card: null }), pointerRef = shR(null), sunlitRef = shR({ v: 0, t: 0 });
+  const gloomRef = shR(false);
   reducedRef.current = reduced;
+  geoRef.current = geo;
+  gloomRef.current = gloom;
 
   const later = (fn, ms) => { const id = setTimeout(fn, ms); timersRef.current.push(id); };
-  shE(() => () => timersRef.current.forEach(clearTimeout), []);
+  shE(() => () => { mountedRef.current = false; timersRef.current.forEach(clearTimeout); }, []);
 
-  // Where the energy cable meets the card (bottom centre), in stage pixels.
-  const getAnchor = shCB(() => {
+  // ----- measure: stage size, island spot, where the energy ribbon plugs into the card -----
+  const measure = shCB(() => {
     const stage = stageRef.current, card = cardRef.current;
-    if (!stage || !card) return null;
-    const s = stage.getBoundingClientRect(), c = card.getBoundingClientRect();
-    return { x: c.left + c.width / 2 - s.left, y: Math.min(s.height - 2, c.bottom - s.top - 1) };
+    if (!stage) return;
+    const s = stage.getBoundingClientRect();
+    const c = card ? card.getBoundingClientRect() : null;
+    rectsRef.current = { stage: s, card: c };
+    const stackedNow = window.matchMedia ? window.matchMedia(LOGIN_STACK_MQ).matches : false;
+    const cardInStage = c ? { left: c.left - s.left, top: c.top - s.top, width: c.width, height: c.height } : null;
+    const spot = loginIslandSpot(s.width, s.height, cardInStage, stackedNow);
+    let anchor = null;
+    if (cardInStage) {
+      anchor = stackedNow
+        ? { x: Math.min(s.width - 4, cardInStage.left + cardInStage.width / 2), y: Math.min(s.height + 40, cardInStage.top + 6) }
+        : { x: cardInStage.left + 4, y: cardInStage.top + cardInStage.height * 0.42 };
+    }
+    const next = { w: s.width, h: s.height, spot, anchor };
+    const prev = geoRef.current;
+    const same = prev && Math.abs(prev.w - next.w) < 1 && Math.abs(prev.h - next.h) < 1 && Math.abs(prev.spot.x - spot.x) < 1 && Math.abs(prev.spot.y - spot.y) < 1 && Math.abs(prev.spot.size - spot.size) < 1
+      && ((!prev.anchor && !anchor) || (prev.anchor && anchor && Math.abs(prev.anchor.x - anchor.x) < 1 && Math.abs(prev.anchor.y - anchor.y) < 1));
+    if (!same) { geoRef.current = next; setGeo(next); sceneRef.current && sceneRef.current.refreshAnchor(); }
   }, []);
-
-  const flashRing = shCB(() => {
-    const ring = ringRef.current;
-    if (!ring || !ring.animate || reducedRef.current) return;
-    ring.animate([{ filter: "brightness(2.1) saturate(1.2)" }, { filter: "brightness(1)" }], { duration: 700, easing: "ease-out" });
-  }, []);
-
-  const setSun = shCB((x, y) => {
-    const root = rootRef.current;
-    if (!root) return;
-    root.style.setProperty("--sun-x", `${x.toFixed(1)}%`);
-    root.style.setProperty("--sun-y", `${y.toFixed(1)}%`);
-  }, []);
-
-  // SVG scene: route the energy line to the card and expose the sun position for the flare.
-  shE(() => {
-    if (scene3d) return undefined;
-    const measure = () => {
-      const svg = svgRef.current, card = cardRef.current;
-      if (!svg || !svg.getScreenCTM) return;
-      const m = svg.getScreenCTM();
-      if (!m) return;
-      const inv = m.inverse();
-      const sunEl = svg.querySelector(".tg-ss-sun-disc");
-      if (sunEl) {
-        const p = new DOMPoint(+sunEl.getAttribute("cx"), +sunEl.getAttribute("cy")).matrixTransform(m);
-        const r = rootRef.current && rootRef.current.getBoundingClientRect();
-        if (r) setSun(((p.x - r.left) / r.width) * 100, ((p.y - r.top) / Math.max(1, r.height)) * 100);
-      }
-      if (isMobile || !card) { setAnchor(null); return; }
-      const c = card.getBoundingClientRect();
-      const p = new DOMPoint(c.left + c.width / 2, Math.min(window.innerHeight - 2, c.bottom - 1)).matrixTransform(inv);
-      setAnchor((a) => (a && Math.abs(a.x - p.x) < 1 && Math.abs(a.y - p.y) < 1 ? a : { x: p.x, y: p.y }));
-    };
+  shLE(() => {
     measure();
     const ro = new ResizeObserver(measure);
     rootRef.current && ro.observe(rootRef.current);
     cardRef.current && ro.observe(cardRef.current);
-    window.addEventListener("resize", measure);
-    return () => { ro.disconnect(); window.removeEventListener("resize", measure); };
-  }, [isMobile, scene3d, setSun]);
+    stageRef.current && ro.observe(stageRef.current);
+    const onWin = () => measure();
+    window.addEventListener("resize", onWin);
+    window.addEventListener("scroll", onWin, { passive: true });
+    return () => { ro.disconnect(); window.removeEventListener("resize", onWin); window.removeEventListener("scroll", onWin); };
+  }, [measure, stacked, isMobile]);
+  shE(() => { measure(); }, [error, measure]);
 
-  // Lazy 3D scene (desktop, capable GPU). Starts after the form is on screen.
+  const flashRing = shCB(() => {
+    const ring = ringRef.current;
+    if (!ring || !ring.animate || reducedRef.current) return;
+    ring.animate([{ filter: "brightness(2.2) saturate(1.3)" }, { filter: "brightness(1)" }], { duration: 650, easing: "ease-out" });
+  }, []);
+
+  // ----- the sun's screen position drives the card: specular highlight, tilt (≤4°), gold edge, charge -----
+  const onSun = shCB((sx, sy, sr, vis) => {
+    const card = cardRef.current, rects = rectsRef.current;
+    if (!card || !rects.stage || !rects.card) return;
+    const x = rects.stage.left + sx, y = rects.stage.top + sy, c = rects.card;
+    const cx = c.left + c.width / 2, cy = c.top + c.height / 2, dx = x - cx, dy = y - cy;
+    const vw = window.innerWidth, vh = window.innerHeight;
+    card.style.setProperty("--spec-x", `${(lgClamp((x - c.left) / c.width, -0.25, 1.25) * 100).toFixed(1)}%`);
+    card.style.setProperty("--spec-y", `${(lgClamp((y - c.top) / c.height, -0.25, 1.25) * 100).toFixed(1)}%`);
+    if (!reducedRef.current && !isMobileRef.current) {
+      card.style.setProperty("--tilt-y", `${(lgClamp(dx / (vw * 0.5), -1, 1) * 4).toFixed(2)}deg`);
+      card.style.setProperty("--tilt-x", `${(lgClamp(-dy / (vh * 0.6), -1, 1) * 3.2).toFixed(2)}deg`);
+    }
+    card.style.setProperty("--edge-a", `${((Math.atan2(dy, dx) * 180) / Math.PI + 90).toFixed(1)}deg`);
+    const lit = lgClamp(1 - Math.hypot(dx, dy) / (Math.max(vw, 600) * 0.7), 0, 1) * lgClamp(vis, 0, 1);
+    card.style.setProperty("--sunlit", lit.toFixed(3));
+    const fxEl = fxRef.current;
+    if (fxEl) { fxEl.style.setProperty("--sun-x", `${x.toFixed(1)}px`); fxEl.style.setProperty("--sun-y", `${y.toFixed(1)}px`); fxEl.style.setProperty("--sun-r", `${Math.max(8, sr).toFixed(1)}px`); }
+    const now = performance.now(), q = Math.round(lit * 20) / 20, st = sunlitRef.current;
+    if (q !== st.v && now - st.t > 140 && mountedRef.current) { st.v = q; st.t = now; setSunlit(q); }
+  }, []);
+  const isMobileRef = shR(isMobile);
+  isMobileRef.current = isMobile;
+
+  // ----- pointer: the sun follows the mouse anywhere; on touch, a drag on the scene area only -----
   shE(() => {
-    if (isMobile) return undefined;
+    const isUi = (el) => !!(el && el.closest && el.closest("input, button, a, label, .tg-login-cardwrap, .tg-login-tiles"));
+    let drag = false;
+    const feed = (e) => {
+      const touchPtr = e.pointerType === "touch";
+      pointerRef.current = { x: e.clientX, y: e.clientY, t: performance.now(), touch: touchPtr };
+      sceneRef.current && sceneRef.current.setPointer(e.clientX, e.clientY, touchPtr);
+    };
+    const inStage = (e) => {
+      const s = rectsRef.current.stage;
+      return !!s && e.clientX >= s.left && e.clientX <= s.right && e.clientY >= s.top && e.clientY <= s.bottom;
+    };
+    const onMove = (e) => {
+      if (e.pointerType === "touch") { if (drag) feed(e); return; }
+      feed(e);
+    };
+    const onDown = (e) => { if (e.pointerType === "touch" && inStage(e) && !isUi(e.target)) { drag = true; feed(e); } };
+    const onUp = () => { drag = false; };
+    window.addEventListener("pointermove", onMove, { passive: true });
+    window.addEventListener("pointerdown", onDown, { passive: true });
+    window.addEventListener("pointerup", onUp, { passive: true });
+    window.addEventListener("pointercancel", onUp, { passive: true });
+    return () => {
+      window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerdown", onDown);
+      window.removeEventListener("pointerup", onUp); window.removeEventListener("pointercancel", onUp);
+    };
+  }, []);
+
+  // ----- lazy 3D scene (capable GPU). Starts after the form is on screen. -----
+  shE(() => {
+    if (!can3d) return undefined;
     let cancelled = false, api = null, idle = 0;
+    const fallback = setTimeout(() => { if (!cancelled && !api) setMode((m) => (m === "pending" ? "svg" : m)); }, 1800);
     const kick = () => {
-      if (cancelled || !loginCan3D()) return;
+      if (cancelled) return;
       import("/src/login-scene.js").then((mod) => {
         if (cancelled || !stageRef.current) return;
         try {
-          api = mod.createSolarScene(stageRef.current, {
+          api = mod.createSunScene(stageRef.current, {
             theme: document.documentElement.getAttribute("data-theme"),
             still: reducedRef.current,
-            getAnchor,
+            lite: isMobile,
+            getIslandSpot: () => geoRef.current.spot,
+            getAnchor: () => geoRef.current.anchor,
             onArrive: flashRing,
-            onSun: setSun,
+            onSun,
             onLowFps: () => {
               if (cancelled || handedOffRef.current) return;
               if (sceneRef.current === api) sceneRef.current = null;
               api.dispose(); api = null;
-              setScene3d(false);
+              setMode("svg");
             },
           });
-        } catch { api = null; return; }
+        } catch { api = null; setMode("svg"); return; }
         sceneRef.current = api;
+        if (rootRef.current) rootRef.current.__loginScene = api;
         api.setMood(moodRef.current);
+        if (pointerRef.current) api.setPointer(pointerRef.current.x, pointerRef.current.y, pointerRef.current.touch);
+        if (skipRef.current) api.skipIntro();
+        if (gloomRef.current) api.error();
         // reveal on the next frame so the canvas has drawn once
-        requestAnimationFrame(() => { if (!cancelled) setScene3d(true); });
-      }).catch(() => {});
+        requestAnimationFrame(() => { if (!cancelled) setMode("3d"); });
+      }).catch(() => { if (!cancelled) setMode("svg"); });
     };
-    idle = window.requestIdleCallback ? window.requestIdleCallback(kick, { timeout: 400 }) : setTimeout(kick, 60);
+    idle = window.requestIdleCallback ? window.requestIdleCallback(kick, { timeout: 200 }) : setTimeout(kick, 30);
     return () => {
       cancelled = true;
+      clearTimeout(fallback);
       window.cancelIdleCallback ? window.cancelIdleCallback(idle) : clearTimeout(idle);
       if (sceneRef.current === api) sceneRef.current = null;
       if (api && !handedOffRef.current) api.dispose();
-      setScene3d(false);
+      if (rootRef.current && rootRef.current.__loginScene === api) rootRef.current.__loginScene = null;
+      setMode(can3d ? "pending" : "svg");
     };
-  }, [isMobile, reduced, getAnchor, flashRing, setSun]);
+  }, [can3d, isMobile, reduced, flashRing, onSun]);
 
-  shE(() => { sceneRef.current && sceneRef.current.setTheme(theme); }, [theme, scene3d]);
+  shE(() => { sceneRef.current && sceneRef.current.setTheme(theme); }, [theme, mode]);
 
-  // Password focus: a soft cloud drifts over the sun and the field dims ("secret" mood).
+  // Password focus: an eclipse — a dark moon slides over the sun, the world turns cool blue-violet.
   shE(() => {
-    moodRef.current = pwFocus ? { cloud: 0.9, dim: 0.22 } : { cloud: 0, dim: 0 };
-    if (!gloom && sceneRef.current) sceneRef.current.setMood(moodRef.current);
-  }, [pwFocus, gloom, scene3d]);
+    moodRef.current = { eclipse: pwFocus ? 1 : 0 };
+    sceneRef.current && sceneRef.current.setMood(moodRef.current);
+  }, [pwFocus, mode]);
 
-  shE(() => { sceneRef.current && sceneRef.current.refreshAnchor(); }, [error, scene3d]);
-
-  // Card tilts 3–4° toward the cursor; a light glint follows the pointer along its edge.
+  // ----- SVG version: the same art, driven by a small rAF loop (sun spring + trackers) -----
   shE(() => {
-    if (isMobile || reduced) return undefined;
-    let raf = 0, ev = null;
-    const apply = () => {
-      raf = 0;
-      const card = cardRef.current;
-      if (!card || !ev) return;
-      const r = card.getBoundingClientRect();
-      const dx = ev.clientX - (r.left + r.width / 2), dy = ev.clientY - (r.top + r.height / 2);
-      const nx = Math.max(-1, Math.min(1, dx / (window.innerWidth * 0.5)));
-      const ny = Math.max(-1, Math.min(1, dy / (window.innerHeight * 0.5)));
-      card.style.setProperty("--tilt-y", `${(nx * 3.6).toFixed(2)}deg`);
-      card.style.setProperty("--tilt-x", `${(-ny * 3.2).toFixed(2)}deg`);
-      card.style.setProperty("--sweep", `${((Math.atan2(dy, dx) * 180) / Math.PI + 90).toFixed(1)}deg`);
+    if (mode !== "svg") return undefined;
+    const svg = svgRef.current;
+    if (!svg) return undefined;
+    const m = sunArtModel(geo.w, geo.h, geo.spot, isMobile);
+    const sunEl = svg.querySelector("[data-sun]");
+    const islandEl = svg.querySelector("[data-island]");
+    const heads = m.panels.map((p) => svg.querySelector(`[data-panel="${p.i}"]`));
+    const glows = m.panels.map((p) => svg.querySelector(`[data-glow="${p.i}"]`));
+    const shadows = m.panels.map((p) => svg.querySelector(`[data-shadow="${p.i}"]`));
+    const veins = m.panels.map((p) => svg.querySelector(`[data-vein="${p.i}"]`));
+    const beams = [0, 1, 2, 3].map((k) => svg.querySelector(`[data-beam="${k}"]`));
+    const st = m.panels.map((p) => ({ roll: (p.i % 2 ? 1 : -1) * 1.1, rv: 0, pitch: -0.5, pv: 0, sx: 0, sy: 3, sz: -1.5, init: false }));
+    const sun = { x: geo.w * 0.6, y: geo.h * 0.22, vx: 0, vy: 0 };
+    const t0 = performance.now();
+    let raf = 0, last = 0, beamPick = 0, beamT = 0;
+    const still = reducedRef.current;
+    const idleSun = (t) => {
+      const a = Math.PI * 0.5 + Math.sin(t * 0.21) * 0.85, z = geo.spot.size, x0 = geo.spot.x, wide = x0 / geo.w < 0.45;
+      const lo = wide ? x0 - z * 0.05 : x0 - z * 0.6, hi = wide ? x0 + z * 0.68 : x0 + z * 0.6;
+      return { x: (lo + hi) / 2 + Math.cos(a) * (hi - lo) / 2 / Math.sin(0.85) * 0.75, y: Math.max(m.sunR + 12, geo.spot.y - z * (0.42 + 0.3 * Math.sin(a))) };
     };
-    const onMove = (e) => { ev = e; if (!raf) raf = requestAnimationFrame(apply); };
-    window.addEventListener("pointermove", onMove, { passive: true });
-    return () => { window.removeEventListener("pointermove", onMove); cancelAnimationFrame(raf); };
-  }, [isMobile, reduced]);
+    const tick = (now) => {
+      const dt = Math.min(0.05, (now - (last || now)) / 1000);
+      last = now;
+      const t = (now - t0) / 1000;
+      const p = pointerRef.current, s = rectsRef.current.stage;
+      const idle = !p || (p.touch && now - p.t > 4000) || still;
+      let target = idle ? idleSun(still ? 0.9 : t) : { x: p.x - (s ? s.left : 0), y: p.y - (s ? s.top : 0) };
+      // keep the sun above the island and within reach
+      const maxY = m.cy + LOGIN_SUN_Z * m.u * m.KY - 2.3 * m.u * m.KH;
+      target = { x: lgClamp(target.x, m.cx - m.u * m.RW * 2.6, m.cx + m.u * m.RW * 2.6), y: Math.min(target.y, maxY) };
+      if (still || !last) { sun.x = target.x; sun.y = target.y; }
+      else {
+        const k = idle ? 10 : 34, c = idle ? 6.5 : 9.5;
+        sun.vx = (sun.vx + (target.x - sun.x) * k * dt) * Math.exp(-c * dt);
+        sun.vy = (sun.vy + (target.y - sun.y) * k * dt) * Math.exp(-c * dt);
+        sun.x += sun.vx * dt; sun.y += sun.vy * dt;
+      }
+      if (t < 0.02 && !still) { sun.x = target.x; sun.y = target.y; }
+      sunEl.setAttribute("transform", `translate(${sun.x.toFixed(1)} ${sun.y.toFixed(1)})`);
+      const bob = still ? 0 : Math.sin(t * 0.9) * m.u * 0.12;
+      islandEl.setAttribute("transform", `translate(0 ${bob.toFixed(2)})`);
+      // sun in island world units (on a plane 1.5 behind the island)
+      const wz = LOGIN_SUN_Z, wx = (sun.x - m.cx) / m.u, wy = (m.cy + wz * m.u * m.KY - (sun.y - bob)) / (m.u * m.KH);
+      const ph = rootRef.current ? rootRef.current.getAttribute("data-phase") : "idle";
+      const succ = ph === "success", storm = gloomRef.current, ecl = moodRef.current.eclipse;
+      const vis = (still ? 1 : lgClamp((t - 0.1) / 0.6, 0, 1)) * (1 - ecl * 0.85) * (storm ? 0.2 : 1);
+      let best = [];
+      m.panels.forEach((pp, j) => {
+        const S = st[j];
+        const tgt = succ ? { x: pp.x, y: 30, z: 52 } : { x: wx, y: wy, z: wz };
+        if (!S.init || still) { S.sx = tgt.x; S.sy = tgt.y; S.sz = tgt.z; S.init = true; }
+        const d = Math.hypot(pp.x - wx * 0.35, pp.z - wz * 0.35), rate = succ ? 30 : 18 / (1 + 1.1 * d);
+        S.sx = lgDamp(S.sx, tgt.x, rate, dt); S.sy = lgDamp(S.sy, tgt.y, rate, dt); S.sz = lgDamp(S.sz, tgt.z, rate, dt);
+        const unfoldAt = 0.72 + pp.k * (0.55 / m.panels.length);
+        const [tr, tp] = !still && t < unfoldAt ? [(pp.i % 2 ? 1 : -1) * 1.1, -0.6] : loginPanelAim(pp, S.sx, S.sy, S.sz, storm ? "droop" : "track");
+        if (still) { S.roll = tr; S.pitch = tp; }
+        else {
+          const k = succ ? 260 : storm ? 70 : 46, c = succ ? 22 : 6.2;
+          S.rv = (S.rv + (tr - S.roll) * k * dt) * Math.exp(-c * dt); S.roll += S.rv * dt;
+          S.pv = (S.pv + (tp - S.pitch) * k * dt) * Math.exp(-c * dt); S.pitch += S.pv * dt;
+        }
+        const ca = Math.cos(S.roll), sa = Math.sin(S.roll), cb = Math.cos(S.pitch), sb = Math.sin(S.pitch);
+        const a = ca, b = -m.KH * sa, c2 = sb * sa, d2 = m.KY * cb + m.KH * sb * ca;
+        heads[j].setAttribute("transform", `translate(${pp.px.toFixed(1)} ${pp.py.toFixed(1)}) matrix(${a.toFixed(4)} ${b.toFixed(4)} ${c2.toFixed(4)} ${d2.toFixed(4)} 0 0)`);
+        // facing → glow
+        const nx = -sa * cb, ny = ca * cb, nz = sb;
+        let lx = wx - pp.x, ly = wy - LOGIN_PIVOT, lz = wz - pp.z; const ll = Math.hypot(lx, ly, lz) || 1;
+        const facing = (nx * lx + ny * ly + nz * lz) / ll;
+        const g = (succ ? 1 : Math.max(0, Math.min(1, (facing - 0.55) / 0.43))) * vis;
+        glows[j].style.opacity = (g * 0.55).toFixed(3);
+        veins[j].style.opacity = (0.15 + g * 0.85).toFixed(3);
+        shadows[j].setAttribute("cx", (pp.bx - lgClamp(lx / Math.max(0.6, ly), -2.4, 2.4) * m.u * 0.38).toFixed(1));
+        shadows[j].setAttribute("rx", (m.PR * (0.95 * Math.abs(ca) + 0.25)).toFixed(1));
+        best.push([g, j]);
+      });
+      // beams of light toward a few of the brightest panels
+      if (now - beamT > 900) { beamT = now; beamPick++; }
+      best.sort((x, y) => y[0] - x[0]);
+      beams.forEach((ln, k) => {
+        const pick = best[(k * 3 + beamPick) % Math.min(best.length, 12)];
+        if (!pick || !ln) return;
+        const pp = m.panels[pick[1]];
+        ln.setAttribute("x1", sun.x.toFixed(1)); ln.setAttribute("y1", sun.y.toFixed(1));
+        ln.setAttribute("x2", pp.px.toFixed(1)); ln.setAttribute("y2", (pp.py + bob).toFixed(1));
+        ln.style.opacity = (pick[0] * (storm || ecl > 0.5 ? 0 : 0.55)).toFixed(3);
+      });
+      onSun(sun.x, sun.y, m.sunR, vis);
+      if (!still) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    const onVis = () => { if (document.hidden) { cancelAnimationFrame(raf); raf = 0; } else if (!raf && !still) { last = 0; raf = requestAnimationFrame(tick); } };
+    document.addEventListener("visibilitychange", onVis);
+    // reduced motion: redraw the still frame when the mood changes
+    const mo = still ? new MutationObserver(() => requestAnimationFrame(tick)) : null;
+    if (mo && rootRef.current) mo.observe(rootRef.current, { attributes: true, attributeFilter: ["data-pw", "data-gloom", "data-phase"] });
+    return () => { cancelAnimationFrame(raf); document.removeEventListener("visibilitychange", onVis); mo && mo.disconnect(); };
+  }, [mode, geo, isMobile, reduced, onSun]);
 
   // Successful login unmounts this component: hand the scene to the afterglow overlay.
   shLE(() => () => {
@@ -1470,9 +1701,17 @@ function Login() {
     runLoginAfterglow(rootRef.current, sceneRef.current, reducedRef.current);
   }, []);
 
+  // Typing skips the intro (it never blocks the form anyway).
+  const skipRef = shR(false);
+  const onKeyDown = () => {
+    if (skipRef.current) return;
+    skipRef.current = true;
+    setSkipIntro(true);
+    sceneRef.current && sceneRef.current.skipIntro();
+  };
+
   const emitPulse = () => {
     if (sceneRef.current) sceneRef.current.pulse();
-    else if (pulseRef.current && pulseRef.current.beginElement && !reducedRef.current) { try { pulseRef.current.beginElement(); } catch { /* SMIL unsupported */ } }
     flashRing();
   };
 
@@ -1489,6 +1728,7 @@ function Login() {
       phaseRef.current = "error";
       setPhase("error");
       setGloom(true);
+      gloomRef.current = true;
       sceneRef.current && sceneRef.current.error();
       const wrap = cardWrapRef.current;
       if (wrap && wrap.animate && !reducedRef.current) {
@@ -1497,7 +1737,7 @@ function Login() {
           { transform: "translateX(-7px)" }, { transform: "translateX(4px)" }, { transform: "translateX(0)" },
         ], { duration: 520, easing: "cubic-bezier(.36,.07,.19,.97)" });
       }
-      later(() => setGloom(false), 1300);
+      later(() => { gloomRef.current = false; setGloom(false); }, 950);
       later(() => { if (phaseRef.current === "error") { phaseRef.current = "idle"; setPhase("idle"); } }, 1400);
     } finally {
       sceneRef.current && sceneRef.current.setSubmitting(false);
@@ -1506,18 +1746,34 @@ function Login() {
 
   const busy = dataLoading || phase === "submitting";
   const chars = username.length + pw.length;
-  const charge = Math.min(0.92, 0.08 + chars * 0.05);
-  const title = t("auth.heroTitle").split(" ");
+  const charge = Math.min(1, 0.04 + Math.min(0.62, chars * 0.045) + sunlit * 0.34);
+  const pct = Math.round(charge * 100);
+  const title = t("auth.sunTitle");
+  const sunWord = t("auth.sunWord");
+  const words = title.split(" ");
+  // wide screens: the hex chips orbit the island (left, right, below); stacked: a row under the card
+  const tilePos = shM(() => {
+    if (stacked) return [null, null, null];
+    const { spot, w, h } = geo, z = spot.size;
+    const cardLeft = rectsRef.current.card ? rectsRef.current.card.left : w * 0.66;
+    const fit = (x, y) => ({ x: lgClamp(x, 66, cardLeft - 72), y: lgClamp(y, 80, h - 70) });
+    // right chip: beside the island if there is room before the card, otherwise lower along the orbit
+    const roomRight = spot.x + z * 0.66 <= cardLeft - 72;
+    return [fit(spot.x - z * 0.66, spot.y - z * 0.04), fit(spot.x + z * 0.66, spot.y + (roomRight ? z * 0.08 : z * 0.4)), fit(spot.x - z * 0.38, spot.y + z * 0.46)];
+  }, [geo, stacked]);
 
   return (
-    <div ref={rootRef} className="tg-login" data-phase={phase} data-scene={isMobile ? "lite" : scene3d ? "3d" : "svg"}
-      data-reduced={reduced ? "1" : undefined} data-pw={pwFocus ? "1" : undefined} data-gloom={gloom ? "1" : undefined}
-      style={{ "--charge": charge }}>
+    <div ref={rootRef} className="tg-login" data-phase={phase} data-chips={!stacked && geo.spot.size < 560 ? "s" : undefined} data-scene={mode} data-size={isMobile ? "lite" : "full"}
+      data-stacked={stacked ? "1" : undefined} data-reduced={reduced ? "1" : undefined} data-pw={pwFocus ? "1" : undefined}
+      data-gloom={gloom ? "1" : undefined} data-skip={skipIntro ? "1" : undefined} style={{ "--charge": charge }}>
       <div className="tg-login-scene" aria-hidden="true">
-        <SolarField lite={isMobile} anchor={isMobile ? null : anchor} svgRef={svgRef} pulseRef={pulseRef} />
+        {mode !== "3d" && <SunArt size={geo} spot={geo.spot} anchor={geo.anchor} lite={isMobile} svgRef={svgRef} />}
         <div className="tg-login-stage" ref={stageRef} />
         <div className="tg-login-veil" />
+      </div>
+      <div className="tg-login-fx" ref={fxRef} aria-hidden="true">
         <div className="tg-login-flash" />
+        <div className="tg-login-shock" />
       </div>
 
       <div className="tg-login-layout">
@@ -1525,25 +1781,35 @@ function Login() {
           <div className="tg-login-brand"><Logo /></div>
           <p className="tg-login-kicker tg-intro">{t("auth.kicker")}</p>
           <h1 className="tg-login-title">
-            {title.map((w, i) => <React.Fragment key={i}><span className="tg-login-word tg-intro" style={{ "--i": i }}>{w}</span>{i < title.length - 1 ? " " : ""}</React.Fragment>)}
+            {words.map((w, i) => {
+              const hot = sunWord && w.toLowerCase().replace(/[^\p{L}']/gu, "") === sunWord.toLowerCase();
+              return <React.Fragment key={i}><span className={`tg-login-word tg-intro${hot ? " tg-login-sunword" : ""}`} style={{ "--i": i }}>{w}</span>{i < words.length - 1 ? " " : ""}</React.Fragment>;
+            })}
           </h1>
-          <p className="tg-login-lead tg-intro">{t("auth.heroText")}</p>
+          <p className="tg-login-lead tg-intro">{t("auth.heroTitle")}</p>
+          <p className="tg-login-hint tg-intro"><span className="tg-login-hint-sun" aria-hidden="true" />{touch ? t("auth.sunHintTouch") : t("auth.sunHint")}</p>
         </section>
 
         <div className="tg-login-cardwrap" ref={cardWrapRef}>
           <div className="tg-login-card" ref={cardRef}>
+            <span className="tg-login-cells" aria-hidden="true" />
+            <span className="tg-login-spec" aria-hidden="true" />
             <span className="tg-login-ring" ref={ringRef} aria-hidden="true" />
             <span className="tg-login-edge" aria-hidden="true" />
             <span className="tg-login-plug" aria-hidden="true" />
-            <form onSubmit={submit} aria-busy={busy}>
+            <form onSubmit={submit} onKeyDown={onKeyDown} aria-busy={busy}>
               <div className="tg-login-cardhead">
                 <div>
                   <h2>{t("auth.loginTitle")}</h2>
                   <p className="tg-login-sub">{t("auth.loginSubtitle")}</p>
                 </div>
-                <div className="tg-login-battery" aria-hidden="true">
-                  <span className="tg-login-battery-body"><span className="tg-login-battery-fill" /><I.zap size={11} /></span>
-                  <span className="tg-login-battery-cap" />
+                <div className="tg-login-meter" aria-hidden="true">
+                  <svg viewBox="0 0 56 56" className="tg-login-meter-ring">
+                    <circle cx="28" cy="28" r="23" className="tg-login-meter-track" />
+                    <circle cx="28" cy="28" r="23" className="tg-login-meter-fill" pathLength="100" />
+                    <circle cx="28" cy="28" r="23" className="tg-login-meter-spin" pathLength="100" />
+                  </svg>
+                  <span className="tg-login-meter-txt"><span className="tg-login-meter-pct">{pct}%</span><span className="tg-login-meter-lbl">{t("auth.charge")}</span></span>
                 </div>
               </div>
               <Field label={t("common.username")}><Input value={username} onChange={e => { if (e.target.value.length > username.length) emitPulse(); setUsername(e.target.value); setError(""); }} autoComplete="username" /></Field>
@@ -1568,9 +1834,9 @@ function Login() {
           </div>
         </div>
         <div className="tg-login-tiles">
-          <LoginTile index={0} big="CRM" label={t("auth.statCrm")} back={t("auth.statCrmBack")} />
-          <LoginTile index={1} big="AI" label={t("auth.statAi")} back={t("auth.statAiBack")} />
-          <LoginTile index={2} big="1" label={t("auth.statFinance")} back={t("auth.statFinanceBack")} />
+          <LoginTile index={0} pos={tilePos[0]} big="CRM" label={t("auth.statCrm")} back={t("auth.statCrmBack")} />
+          <LoginTile index={1} pos={tilePos[1]} big="AI" label={t("auth.statAi")} back={t("auth.statAiBack")} />
+          <LoginTile index={2} pos={tilePos[2]} big="1" label={t("auth.statFinance")} back={t("auth.statFinanceBack")} />
         </div>
       </div>
     </div>
