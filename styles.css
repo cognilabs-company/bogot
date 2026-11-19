@@ -136,6 +136,9 @@ a { color: inherit; text-decoration: none; }
 .app-shell { display: flex; height: 100vh; overflow: hidden; }
 .main-col { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .content { flex: 1; overflow-y: auto; overflow-x: hidden; }
+/* set by app.jsx while .content scrolls: no hover hit-testing/transitions, idle animations paused */
+[data-scrolling] .content > * { pointer-events: none; }
+[data-scrolling] .tg-wind-glyph, [data-scrolling] .tg-wind-glyph path { animation-play-state: paused !important; }
 .page { padding: var(--page-pad, 26px) calc(var(--page-pad, 26px) + 4px) 60px; max-width: var(--page-max, 1560px); margin: 0 auto; }
 @media (max-width: 720px){ .page { padding: 18px 16px 50px; } }
 

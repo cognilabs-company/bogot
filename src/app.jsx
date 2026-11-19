@@ -1,6 +1,21 @@
 /* app.jsx — router + root */
 const { useState: aS, useEffect: aE } = React;
 
+// While the main page scrolls, mark <html data-scrolling>: CSS then skips row/card hover
+// effects and pauses idle animations, so rows sliding under the cursor don't restart
+// transitions (style + layout + paint) on every frame.
+(function trackMainScroll() {
+  let timer = 0;
+  const root = document.documentElement;
+  document.addEventListener("scroll", (e) => {
+    const t = e.target;
+    if (!t || !t.classList || !t.classList.contains("content")) return;
+    if (!timer) root.setAttribute("data-scrolling", "");
+    clearTimeout(timer);
+    timer = setTimeout(() => { timer = 0; root.removeAttribute("data-scrolling"); }, 160);
+  }, { capture: true, passive: true });
+})();
+
 const PLACEHOLDER_LABELS = {
   "/notifications": "Bildirishnomalar",
   "/integrations": "Integratsiyalar",
