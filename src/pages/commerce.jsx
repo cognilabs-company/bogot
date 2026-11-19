@@ -651,15 +651,11 @@ function OrdersPage() {
                   </div>
                 </div>
               </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                {group.orders.map(o => <OrderRow key={o.id} o={o} onClick={() => nav("/debtors/" + o.id)} onEdit={canManage ? () => setEditOrder(o) : undefined} onDelete={canManage ? () => setDeleteOrder(o) : undefined} onAddPayment={canManage ? () => setAddPaymentOrder(o) : undefined} />)}
-              </div>
+              <ShowMoreList items={group.orders} step={20} gap={12} render={o => <OrderRow key={o.id} o={o} onClick={() => nav("/debtors/" + o.id)} onEdit={canManage ? () => setEditOrder(o) : undefined} onDelete={canManage ? () => setDeleteOrder(o) : undefined} onAddPayment={canManage ? () => setAddPaymentOrder(o) : undefined} />} />
             </Card>
           ))}
           {!!grouped.ungrouped.length && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              {grouped.ungrouped.map(o => <OrderRow key={o.id} o={o} onClick={() => nav("/debtors/" + o.id)} onEdit={canManage ? () => setEditOrder(o) : undefined} onDelete={canManage ? () => setDeleteOrder(o) : undefined} onAddPayment={canManage ? () => setAddPaymentOrder(o) : undefined} />)}
-            </div>
+            <ShowMoreList items={grouped.ungrouped} step={20} gap={12} render={o => <OrderRow key={o.id} o={o} onClick={() => nav("/debtors/" + o.id)} onEdit={canManage ? () => setEditOrder(o) : undefined} onDelete={canManage ? () => setDeleteOrder(o) : undefined} onAddPayment={canManage ? () => setAddPaymentOrder(o) : undefined} />} />
           )}
         </div>
       ) : (
@@ -693,18 +689,14 @@ function OrdersPage() {
                         {comTx("remainingLabel")} {fmtUZS(mahallaGroup.totalDebt)}{mahallaGroup.overdueDebt > 0 ? ` • ${comTx("overdueLabel")} ${fmtUZS(mahallaGroup.overdueDebt)}` : ""}
                       </div>
                     </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                      {mahallaGroup.orders.map(o => <OrderRow key={o.id} o={o} onClick={() => nav("/debtors/" + o.id)} onEdit={canManage ? () => setEditOrder(o) : undefined} onDelete={canManage ? () => setDeleteOrder(o) : undefined} onAddPayment={canManage ? () => setAddPaymentOrder(o) : undefined} />)}
-                    </div>
+                    <ShowMoreList items={mahallaGroup.orders} step={20} gap={12} render={o => <OrderRow key={o.id} o={o} onClick={() => nav("/debtors/" + o.id)} onEdit={canManage ? () => setEditOrder(o) : undefined} onDelete={canManage ? () => setDeleteOrder(o) : undefined} onAddPayment={canManage ? () => setAddPaymentOrder(o) : undefined} />} />
                   </Card>
                 ))}
               </div>
             </div>
           ))}
           {!!grouped.ungrouped.length && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              {grouped.ungrouped.map(o => <OrderRow key={o.id} o={o} onClick={() => nav("/debtors/" + o.id)} onEdit={canManage ? () => setEditOrder(o) : undefined} onDelete={canManage ? () => setDeleteOrder(o) : undefined} onAddPayment={canManage ? () => setAddPaymentOrder(o) : undefined} />)}
-            </div>
+            <ShowMoreList items={grouped.ungrouped} step={20} gap={12} render={o => <OrderRow key={o.id} o={o} onClick={() => nav("/debtors/" + o.id)} onEdit={canManage ? () => setEditOrder(o) : undefined} onDelete={canManage ? () => setDeleteOrder(o) : undefined} onAddPayment={canManage ? () => setAddPaymentOrder(o) : undefined} />} />
           )}
         </div>
       )}

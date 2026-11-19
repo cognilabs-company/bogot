@@ -20,7 +20,7 @@ function Placeholder({ label }) {
 }
 
 function Router() {
-  const { authed, role, dataLoading, data, lang, toast } = useApp();
+  const { authed, role, dataLoading, data, lang, toast, logout } = useApp();
   const [route, nav] = useRoute();
   const [mobileOpen, setMobileOpen] = aS(false);
   const [cmdOpen, setCmdOpen] = aS(false);
@@ -59,6 +59,9 @@ function Router() {
     const ap = bp === "/pipeline" ? "/tasks" : bp === "/leads" ? "/customers" : bp;
     if (!canAccess(role, ap, data)) {
       const first = NAV.flatMap(g => g.items).find(it => canAccess(role, it.path, data));
+      // No allowed page at all: redirecting to /dashboard again would loop forever
+      // (and refetch data on every hop), so stay put and show the notice instead.
+      if (!first && ap === "/dashboard") return;
       toast("Bu bo'limga ruxsat yo'q", "error");
       nav(first ? first.path : "/dashboard", { replace: true });
     }
@@ -82,7 +85,21 @@ function Router() {
   // access guard
   const basePath = "/" + route.split("/")[1];
   const accessPath = basePath === "/pipeline" ? "/tasks" : basePath === "/leads" ? "/customers" : basePath;
-  if (!canAccess(role, accessPath, data)) return null;
+  if (!canAccess(role, accessPath, data)) {
+    const hasAnyPage = NAV.flatMap(g => g.items).some(it => canAccess(role, it.path, data));
+    if (hasAnyPage) return null;
+    return (
+      <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 24, background: "var(--bg)" }}>
+        <Card style={{ maxWidth: 420, width: "100%" }}>
+          <div style={{ display: "grid", gap: 12, textAlign: "center" }}>
+            <strong>Sizga hech bir bo'limga ruxsat berilmagan</strong>
+            <div style={{ fontSize: 13, color: "var(--text-3)" }}>Administratorga murojaat qiling.</div>
+            <div><Button variant="default" onClick={logout}>Chiqish</Button></div>
+          </div>
+        </Card>
+      </div>
+    );
+  }
 
   const seg = route.split("/").filter(Boolean);
   let page = null;

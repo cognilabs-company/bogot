@@ -1092,7 +1092,28 @@ function PaginationBar({ page, total, pageSize, onChange }) {
   );
 }
 
+// Renders the first `step` items and a "show more" button for the rest, so long
+// lists don't put thousands of nodes in the DOM at once.
+function ShowMoreList({ items, render, step = 30, gap = 12 }) {
+  const [limit, setLimit] = React.useState(step);
+  const visible = items.length > limit ? items.slice(0, limit) : items;
+  const hidden = items.length - visible.length;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap }}>
+      {visible.map(render)}
+      {hidden > 0 && (
+        <div style={{ display: "flex", justifyContent: "center" }}>
+          <Button variant="ghost" size="sm" onClick={() => setLimit((value) => value + step)}>
+            {`Yana ${Math.min(step, hidden)} ta ko'rsatish (${hidden} ta qoldi)`}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 Object.assign(window, {
+  ShowMoreList,
   Card, CardHead, Button, IconButton, Badge, StatusBadge, Avatar, Tabs, Segmented,
   SearchInput, Field, Input, Textarea, DatePickerInput, Select, Toggle, Dropdown, Modal, Drawer,
   ConfirmDialog, EmptyState, SkeletonRows,

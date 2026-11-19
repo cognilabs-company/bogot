@@ -1200,9 +1200,8 @@ function NotificationsPage() {
         ))}
       </div>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {filtered.length === 0 && <EmptyState icon={<I.bell size={26} />} title={sx("noNotifications")} message={sx("noNotificationsMessage")} />}
-        {filtered.map(n => {
+      {filtered.length === 0 && <EmptyState icon={<I.bell size={26} />} title={sx("noNotifications")} message={sx("noNotificationsMessage")} />}
+      <ShowMoreList key={filter} items={filtered} step={40} gap={8} render={n => {
           const Ico = I[TYPE_ICON[n.type] || "bell"];
           return (
             <Card key={n.id} hover {...sideLine(n.read ? "neutral" : (TYPE_COLOR[n.type] && TYPE_COLOR[n.type] !== "slate" ? TYPE_COLOR[n.type] : "accent"), { active: !n.read, style: { opacity: n.read ? 0.78 : 1 } })}>
@@ -1223,8 +1222,7 @@ function NotificationsPage() {
               </div>
             </Card>
           );
-        })}
-      </div>
+        }} />
     </div>
   );
 }

@@ -71,6 +71,10 @@ function mergeRemoteData(remote, previous) {
     ...prev,
     ...remote,
   };
+  // The current user may be loaded in a separate request now; keep them in the users list as before.
+  if ("users" in remote && next.authUser && Array.isArray(next.users) && !next.users.find((user) => user.id === next.authUser.id)) {
+    next.users = [next.authUser, ...next.users];
+  }
   const hasApiLocations = "districts" in remote || "neighborhoods" in remote;
   const hasClientLocations = "customers" in remote || "orders" in remote;
   if (hasApiLocations || hasClientLocations) {
@@ -86,6 +90,11 @@ function mergeRemoteData(remote, previous) {
 }
 
 const BASE_COLLECTIONS = ["authUser", "notifications"];
+// Collections younger than this are shown from memory on page switch; older
+// ones are shown immediately and refreshed in the background.
+const COLLECTION_STALE_MS = 60 * 1000;
+// Extra response fields that belong to a collection key.
+const COLLECTION_EXTRA_FIELDS = { orders: ["ordersTotal"] };
 
 function routeCollectionKeys(route) {
   const normalized = normalizeRoute(route);
@@ -93,10 +102,11 @@ function routeCollectionKeys(route) {
 
   switch (main) {
     case "dashboard":
-      return [...BASE_COLLECTIONS, "users", "customers", "orders", "tasks", "taskColumns", "payments", "accountingDays", "products", "dashboardOverview"];
+      // The dashboard fetches its own client/payment pages; it does not read the full customer/payment lists.
+      return [...BASE_COLLECTIONS, "users", "orders", "tasks", "taskColumns", "accountingDays", "products", "dashboardOverview"];
     case "customers":
     case "leads":
-      return [...BASE_COLLECTIONS, "customers", "clientStatuses", "orders", "payments", "accountingDays", "districts", "neighborhoods"];
+      return [...BASE_COLLECTIONS, "customers", "clientStatuses", "orders", "accountingDays", "districts", "neighborhoods"];
     case "tasks":
     case "pipeline":
       return [...BASE_COLLECTIONS, "tasks", "taskColumns", "taskAssignees"];
@@ -123,7 +133,7 @@ function routeCollectionKeys(route) {
     case "integrations":
       return [...BASE_COLLECTIONS, "integrationConfigs", "integrationEvents", "aiSettings"];
     case "settings":
-      return [...BASE_COLLECTIONS, "clientStatuses", "customers", "aiSettings", "activeAiSettings"];
+      return [...BASE_COLLECTIONS, "clientStatuses", "aiSettings", "activeAiSettings"];
     default:
       return [...BASE_COLLECTIONS];
   }
@@ -159,7 +169,14 @@ function AppProvider({ children }) {
   const [data, setData] = useState(() => createLocalSeed());
   const dataRef = useRef(data);
   const chatWsRef = useRef(null);
-  const loadedCollectionsRef = useRef(new Set());
+  // key -> timestamp of the last successful load
+  const loadedAtRef = useRef(new Map());
+  // key -> { seq, promise } of the newest request for that key
+  const inflightRef = useRef(new Map());
+  const requestSeqRef = useRef(0);
+  // bumped on login/logout so late responses from an old session are dropped
+  const sessionEpochRef = useRef(0);
+  const blockingLoadsRef = useRef(0);
 
   useEffect(() => {
     dataRef.current = data;
@@ -219,48 +236,123 @@ function AppProvider({ children }) {
   }, []);
   const dismissToast = useCallback((id) => setToasts((items) => items.filter((item) => item.id !== id)), []);
 
-  const loadCollections = useCallback(async (keys, { silent = false, force = false } = {}) => {
+  const resetCollectionCache = useCallback(() => {
+    sessionEpochRef.current += 1;
+    loadedAtRef.current = new Map();
+    inflightRef.current = new Map();
+  }, []);
+
+  // Loads collections from the API.
+  // - force: always refetch (used after create/update/delete)
+  // - maxAge: refetch keys older than this many ms (undefined = only keys never loaded)
+  // - background: do not toggle the global dataLoading flag
+  // A key that is already being fetched is not requested a second time unless forced.
+  const loadCollections = useCallback(async (keys, { silent = false, force = false, maxAge, background = false } = {}) => {
     if (!apiLoadSession()?.access) return null;
     const requested = [...new Set((keys || []).filter(Boolean))];
-    const targetKeys = force ? requested : requested.filter((key) => !loadedCollectionsRef.current.has(key));
-    if (!targetKeys.length) return null;
-    setDataLoading(true);
+    const now = Date.now();
+    const waitFor = [];
+    const targetKeys = requested.filter((key) => {
+      const running = inflightRef.current.get(key);
+      if (!force && running) {
+        waitFor.push(running.promise);
+        return false;
+      }
+      if (force) return true;
+      const loadedAt = loadedAtRef.current.get(key);
+      if (loadedAt === undefined) return true;
+      return maxAge !== undefined && now - loadedAt >= maxAge;
+    });
+    if (!targetKeys.length) {
+      if (waitFor.length) await Promise.allSettled(waitFor);
+      return null;
+    }
+
+    const epoch = sessionEpochRef.current;
+    const seq = ++requestSeqRef.current;
+    const promise = apiLoadCollections(targetKeys, dataRef.current);
+    const settled = promise.then(() => null, () => null);
+    targetKeys.forEach((key) => inflightRef.current.set(key, { seq, promise: settled }));
+
+    if (!background) {
+      blockingLoadsRef.current += 1;
+      setDataLoading(true);
+    }
     try {
-      const remote = await apiLoadCollections(targetKeys, dataRef.current);
-      setData((previous) => mergeRemoteData(remote, previous));
-      targetKeys.forEach((key) => loadedCollectionsRef.current.add(key));
-      if (remote.authUser?.role) setRole(remote.authUser.role);
+      const remote = await promise;
+      if (epoch !== sessionEpochRef.current) return null;
+      // Only apply keys for which no newer request was started meanwhile,
+      // so a slow old response can't overwrite fresher data.
+      const applied = {};
+      const loadedAt = Date.now();
+      targetKeys.forEach((key) => {
+        const latest = inflightRef.current.get(key);
+        if (latest && latest.seq !== seq) return;
+        inflightRef.current.delete(key);
+        loadedAtRef.current.set(key, loadedAt);
+        if (key in remote) applied[key] = remote[key];
+        (COLLECTION_EXTRA_FIELDS[key] || []).forEach((field) => {
+          if (field in remote) applied[field] = remote[field];
+        });
+      });
+      if (Object.keys(applied).length) {
+        setData((previous) => mergeRemoteData(applied, previous));
+        if (applied.authUser?.role) setRole(applied.authUser.role);
+      }
+      if (waitFor.length) await Promise.allSettled(waitFor);
       return remote;
     } catch (error) {
+      targetKeys.forEach((key) => {
+        if (inflightRef.current.get(key)?.seq === seq) inflightRef.current.delete(key);
+      });
+      if (epoch !== sessionEpochRef.current) return null;
       if (!silent) toast(error.message || "Ma'lumotlarni yuklab bo'lmadi", "error");
       throw error;
     } finally {
-      setDataLoading(false);
+      if (!background) {
+        blockingLoadsRef.current = Math.max(0, blockingLoadsRef.current - 1);
+        if (!blockingLoadsRef.current) setDataLoading(false);
+      }
     }
   }, [toast]);
 
   const refreshCollections = useCallback(async (requiredKeys, optionalKeys = []) => {
     const keys = [
       ...requiredKeys,
-      ...optionalKeys.filter((key) => loadedCollectionsRef.current.has(key)),
+      ...optionalKeys.filter((key) => loadedAtRef.current.has(key)),
     ];
     return loadCollections(keys, { silent: true, force: true });
   }, [loadCollections]);
 
   const logout = useCallback(() => {
     apiClearSession();
-    loadedCollectionsRef.current = new Set();
+    resetCollectionCache();
+    blockingLoadsRef.current = 0;
     setAuthed(false);
     setDataLoading(false);
     setData(createLocalSeed());
-  }, []);
+  }, [resetCollectionCache]);
 
   useEffect(() => {
     if (!authed) return undefined;
+    const handleError = (error) => {
+      if (error?.isAuthError || (error?.message || "").toLowerCase().includes("token")) logout();
+    };
     const syncRouteCollections = () => {
-      loadCollections(routeCollectionKeys(readRoute()), { silent: true, force: true }).catch((error) => {
-        if (error?.isAuthError || (error.message || "").toLowerCase().includes("token")) logout();
-      });
+      const keys = routeCollectionKeys(readRoute());
+      // The current user is loaded on its own first, so the app shell can render
+      // without waiting for the slowest list on the page.
+      if (!loadedAtRef.current.has("authUser")) {
+        loadCollections(["authUser"], { silent: true }).catch(handleError);
+      }
+      // Missing collections are fetched now; ones already in memory are shown
+      // immediately and refreshed in the background once they're stale.
+      loadCollections(keys, { silent: true }).catch(handleError);
+      loadCollections(keys.filter((key) => loadedAtRef.current.has(key)), {
+        silent: true,
+        background: true,
+        maxAge: COLLECTION_STALE_MS,
+      }).catch(handleError);
     };
     syncRouteCollections();
     window.addEventListener("app:navigate", syncRouteCollections);
@@ -279,7 +371,7 @@ function AppProvider({ children }) {
       const refresh = result?.refresh || result?.tokens?.refresh || result?.token?.refresh;
       if (!access) throw new Error("Access token qaytmadi");
       apiSaveSession({ access, refresh, user: result?.user || null });
-      loadedCollectionsRef.current = new Set();
+      resetCollectionCache();
       setData(createLocalSeed());
       setRole(apiUiRole(result?.user?.role || "operator"));
       setAuthed(true);
@@ -293,7 +385,7 @@ function AppProvider({ children }) {
     } finally {
       setDataLoading(false);
     }
-  }, [loadCollections, toast]);
+  }, [resetCollectionCache, toast]);
 
   const update = useCallback((key, updater) => {
     setData((current) => ({

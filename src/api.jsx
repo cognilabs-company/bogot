@@ -322,13 +322,54 @@ function apiListItems(payload) {
   return [];
 }
 
+const API_PAGINATE_CONCURRENCY = 6;
+
+function apiPageRows(page) {
+  return Array.isArray(page?.results) ? page.results : Array.isArray(page) ? page : [];
+}
+
+// Fetches every page of a list endpoint. After the first page, when the backend
+// reports `count` and uses ?page=N links, the remaining pages are requested in
+// parallel instead of one after another. Anything else falls back to following
+// `next` links sequentially.
 async function apiPaginateAll(path) {
-  const all = [];
-  let next = apiNormalizeUrl(`${API_BASE}${path.includes("?") ? `${path}&page_size=100` : `${path}?page_size=100`}`);
+  const firstUrl = apiNormalizeUrl(`${API_BASE}${path.includes("?") ? `${path}&page_size=100` : `${path}?page_size=100`}`);
+  const first = apiUnwrap(await apiRequest(firstUrl, { auth: true }));
+  const all = [...apiPageRows(first)];
+  if (!first?.next) return all;
+
+  let nextUrl = null;
+  try { nextUrl = new URL(apiNormalizeUrl(first.next)); } catch (e) { nextUrl = null; }
+  const pageSize = all.length;
+  const count = Number(first?.count);
+  const canParallel = nextUrl && nextUrl.searchParams.get("page") === "2" && pageSize > 0 && Number.isFinite(count) && count > pageSize;
+
+  let next = apiNormalizeUrl(first.next);
+  if (canParallel) {
+    const totalPages = Math.ceil(count / pageSize);
+    const pageNumbers = [];
+    for (let n = 2; n <= totalPages; n += 1) pageNumbers.push(n);
+    const pages = new Array(pageNumbers.length);
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < pageNumbers.length) {
+        const index = cursor;
+        cursor += 1;
+        const url = new URL(nextUrl.href);
+        url.searchParams.set("page", String(pageNumbers[index]));
+        pages[index] = apiUnwrap(await apiRequest(url.toString(), { auth: true }));
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(API_PAGINATE_CONCURRENCY, pageNumbers.length) }, worker));
+    pages.forEach((page) => all.push(...apiPageRows(page)));
+    // Rows added while we were loading: keep following `next` from the last page.
+    const last = pages[pages.length - 1];
+    next = last?.next ? apiNormalizeUrl(last.next) : null;
+  }
+
   while (next) {
     const page = apiUnwrap(await apiRequest(next, { auth: true }));
-    const rows = Array.isArray(page?.results) ? page.results : Array.isArray(page) ? page : [];
-    all.push(...rows);
+    all.push(...apiPageRows(page));
     next = page?.next ? apiNormalizeUrl(page.next) : null;
   }
   return all;
@@ -1088,24 +1129,33 @@ async function apiLoadCollections(keys = [], currentData = {}) {
     })
   );
 
-  await Promise.all(jobs);
+  // Tasks and accounting entries need columns/days for mapping, but the raw
+  // lists can be fetched at the same time; only the mapping waits.
+  const independentJobs = Promise.all(jobs);
+  const independentOk = independentJobs.then(() => true, () => false);
+  const dependentJobs = [];
+  if (wanted.has("tasks")) dependentJobs.push(
+    Promise.all([apiPaginateAll("/api/tasks/").catch(() => []), independentOk]).then(([tasks, ok]) => {
+      if (!ok) return;
+      const taskColumns = wanted.has("taskColumns") ? data.taskColumns : (currentData.taskColumns || []);
+      const columnsById = Object.fromEntries(taskColumns.map((column) => [column.id, column]));
+      data.tasks = tasks.map((task) => mapApiTask(task, columnsById));
+    })
+  );
+  if (wanted.has("payments")) dependentJobs.push(
+    Promise.all([apiPaginateAll("/api/clients/accounting/entries/").catch(() => []), independentOk]).then(([accountingEntries, ok]) => {
+      if (!ok) return;
+      const accountingDays = wanted.has("accountingDays") ? data.accountingDays : (currentData.accountingDays || []);
+      const dayMap = Object.fromEntries(accountingDays.map((day) => [day.id, day]));
+      data.payments = accountingEntries.map((entry) => mapApiAccountingEntry(entry, dayMap));
+    })
+  );
+
+  await independentJobs;
+  await Promise.all(dependentJobs);
 
   if (wanted.has("users") && wanted.has("authUser") && data.authUser && !data.users.find((user) => user.id === data.authUser.id)) {
     data.users.unshift(data.authUser);
-  }
-
-  if (wanted.has("tasks")) {
-    const taskColumns = wanted.has("taskColumns") ? data.taskColumns : (currentData.taskColumns || []);
-    const columnsById = Object.fromEntries(taskColumns.map((column) => [column.id, column]));
-    const tasks = await apiPaginateAll("/api/tasks/").catch(() => []);
-    data.tasks = tasks.map((task) => mapApiTask(task, columnsById));
-  }
-
-  if (wanted.has("payments")) {
-    const accountingDays = wanted.has("accountingDays") ? data.accountingDays : (currentData.accountingDays || []);
-    const dayMap = Object.fromEntries(accountingDays.map((day) => [day.id, day]));
-    const accountingEntries = await apiPaginateAll("/api/clients/accounting/entries/").catch(() => []);
-    data.payments = accountingEntries.map((entry) => mapApiAccountingEntry(entry, dayMap));
   }
 
   if (wanted.has("customers") || wanted.has("orders")) {
