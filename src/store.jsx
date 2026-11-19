@@ -103,8 +103,10 @@ function routeCollectionKeys(route) {
   switch (main) {
     case "dashboard":
       // The dashboard fetches its own client/payment pages; it does not read the full customer/payment lists.
-      return [...BASE_COLLECTIONS, "users", "orders", "tasks", "taskColumns", "accountingDays", "products", "dashboardOverview"];
+      return [...BASE_COLLECTIONS, "users", "tasks", "taskColumns", "accountingDays", "products", "dashboardOverview"];
     case "customers":
+      // The client list, filters and detail page all request their rows page by page from the server.
+      return [...BASE_COLLECTIONS, "clientStatuses", "accountingDays", "districts", "neighborhoods"];
     case "leads":
       return [...BASE_COLLECTIONS, "customers", "clientStatuses", "orders", "accountingDays", "districts", "neighborhoods"];
     case "tasks":
@@ -118,7 +120,8 @@ function routeCollectionKeys(route) {
       return [...BASE_COLLECTIONS];
     case "debtors":
     case "orders":
-      return [...BASE_COLLECTIONS, "orders", "customers", "districts", "neighborhoods"];
+      // Debtors are listed 50 per page by the server; counts come from /debtors/stats/.
+      return [...BASE_COLLECTIONS, "districts", "neighborhoods"];
     case "locations":
       return [...BASE_COLLECTIONS, "districts", "neighborhoods"];
     case "accounting":
@@ -324,6 +327,18 @@ function AppProvider({ children }) {
     return loadCollections(keys, { silent: true, force: true });
   }, [loadCollections]);
 
+  // Re-fetch already-loaded collections without blocking the UI or awaiting the result.
+  const refreshLoadedInBackground = useCallback((keys) => {
+    const loaded = keys.filter((key) => loadedAtRef.current.has(key));
+    if (loaded.length) loadCollections(loaded, { silent: true, force: true, background: true }).catch(() => {});
+  }, [loadCollections]);
+
+  // Loads collections a page needs for totals/grouping without blocking the UI.
+  // Already-loaded keys are reused until they're older than COLLECTION_STALE_MS.
+  const loadInBackground = useCallback((keys) => (
+    loadCollections(keys, { silent: true, background: true, maxAge: COLLECTION_STALE_MS }).catch(() => null)
+  ), [loadCollections]);
+
   const logout = useCallback(() => {
     apiClearSession();
     resetCollectionCache();
@@ -413,11 +428,11 @@ function AppProvider({ children }) {
     }
     if (key === "customers") {
       await apiSaveClient(item, dataRef.current);
-      await refreshCollections(["customers"], ["dashboardOverview", "notifications"]);
+      refreshLoadedInBackground(["customers", "clientStatuses", "dashboardOverview", "notifications"]);
     }
     if (key === "orders") {
       await apiSaveDebtor(item);
-      await refreshCollections(["orders"], ["dashboardOverview", "notifications"]);
+      refreshLoadedInBackground(["orders", "dashboardOverview", "notifications"]);
     }
     if (key === "tasks") {
       await apiSaveTask(item);
@@ -460,7 +475,7 @@ function AppProvider({ children }) {
       await refreshCollections(["neighborhoods"]);
     }
     return item;
-  }, [refreshCollections]);
+  }, [refreshCollections, refreshLoadedInBackground]);
 
   const remove = useCallback(async (key, id) => {
     if (!REMOTE_COLLECTIONS.has(key)) {
@@ -474,11 +489,11 @@ function AppProvider({ children }) {
     }
     if (key === "customers") {
       await apiDelete(`/api/clients/${id}/`);
-      await refreshCollections(["customers"], ["dashboardOverview", "notifications"]);
+      refreshLoadedInBackground(["customers", "clientStatuses", "dashboardOverview", "notifications"]);
     }
     if (key === "orders") {
       await apiDelete(`/api/clients/debtors/${id}/`);
-      await refreshCollections(["orders"], ["dashboardOverview", "notifications"]);
+      refreshLoadedInBackground(["orders", "dashboardOverview", "notifications"]);
     }
     if (key === "tasks") {
       await apiDelete(`/api/tasks/${id}/`);
@@ -520,7 +535,7 @@ function AppProvider({ children }) {
       await apiDelete(`/api/clients/neighborhoods/${id}/`);
       await refreshCollections(["neighborhoods"]);
     }
-  }, [refreshCollections]);
+  }, [refreshCollections, refreshLoadedInBackground]);
 
   const refreshConversation = useCallback(async (sessionId, nextMessages = null) => {
     const rawSession = await apiLoadChatSession(sessionId);
@@ -724,7 +739,7 @@ function AppProvider({ children }) {
     theme, setTheme, accent, setAccent, lang, setLang, density, setDensity,
     layout, setLayout, container, setContainer, direction, setDirection,
     sidebarCollapsed, setSidebarCollapsed, role, setRole, authed, setAuthed,
-    dataLoading, data, setData, update, upsert, remove, resetData, reloadData: () => loadCollections(routeCollectionKeys(readRoute()), { force: true }),
+    dataLoading, data, setData, update, upsert, remove, resetData, loadInBackground, reloadData: () => loadCollections(routeCollectionKeys(readRoute()), { force: true }),
     login, logout, ensureConversationMessages, sendConversationMessage, deleteConversation, setConversationMode, markConversationRead,
     moveTask, markNotificationRead, markAllNotificationsRead, clearNotifications,
     t, toast, toasts, dismissToast, nav,

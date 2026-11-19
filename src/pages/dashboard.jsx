@@ -159,19 +159,35 @@ function DashboardPage() {
   }, [range]);
   const loading = useLoading(320);
   const me = data.users.find((user) => user.role === role) || data.authUser || data.users[0] || { fullName: dashTx("userFallback") };
-  const overview = data.dashboardOverview || {};
+  // Without a date range the store's overview is used; with one, the overview is requested for that range.
+  const [rangeOverview, setRangeOverview] = pS(null);
+  const [rangeOverviewState, setRangeOverviewState] = pS("idle"); // "idle" | "loading" | "ready" | "error"
+  const overview = (dateFrom || dateTo) ? (rangeOverview || {}) : (data.dashboardOverview || {});
   const clientSummary = overview.clients || {};
   const debtorSummary = overview.debtors || {};
   const accountingDay = overview.accounting_day || null;
 
   const [dashClients, setDashClients] = pS([]);
   const [dashClientsTotal, setDashClientsTotal] = pS(null);
-  const [dashDebtorTotal, setDashDebtorTotal] = pS(null);
   const [dashPayments, setDashPayments] = pS([]);
+  // Debtor balance breakdown (open / overdue / closed) from /debtors/stats/, and the first 5 overdue debtors.
+  const [debtorStats, setDebtorStats] = pS(null);
+  const [overdueDebtors, setOverdueDebtors] = pS([]);
   pE(() => {
-    apiGetDebtorsPage({ page: 1, page_size: 50 })
-      .then(r => { if (r.count) setDashDebtorTotal(r.count); }).catch(() => {});
-  }, []);
+    let cancelled = false;
+    const range = { date_from: dateFrom || undefined, date_to: dateTo || undefined };
+    if (dateFrom || dateTo) {
+      setRangeOverviewState("loading");
+      apiGetDashboardOverview(range)
+        .then((res) => { if (!cancelled) { setRangeOverview(res); setRangeOverviewState(res ? "ready" : "error"); } })
+        .catch(() => { if (!cancelled) { setRangeOverview(null); setRangeOverviewState("error"); } });
+    }
+    apiGetDebtorStats(range).then((res) => { if (!cancelled) setDebtorStats(res); });
+    apiGetDebtorsPage({ ...range, balance_status: "overdue", page: 1, page_size: 5 })
+      .then((r) => { if (!cancelled) setOverdueDebtors(r.results || []); })
+      .catch(() => { if (!cancelled) setOverdueDebtors([]); });
+    return () => { cancelled = true; };
+  }, [dateFrom, dateTo]);
   pE(() => {
     apiGetClientsPage({ page: 1, page_size: 200, ordering: "-created_at", ...(dateFrom ? { created_at_after: dateFrom } : {}), ...(dateTo ? { created_at_before: dateTo } : {}) })
       .then(r => { setDashClients(r.results || []); setDashClientsTotal(r.count ?? null); }).catch(() => {});
@@ -182,16 +198,6 @@ function DashboardPage() {
   }, [dateFrom, dateTo]);
 
   const dateActive = !!(dateFrom || dateTo);
-  const allOrders = data.orders || [];
-  const filteredOrders = pM(() => {
-    if (!dateActive) return allOrders;
-    return allOrders.filter(o => {
-      const d = (o.createdAt || "").slice(0, 10);
-      if (dateFrom && d < dateFrom) return false;
-      if (dateTo && d > dateTo) return false;
-      return true;
-    });
-  }, [allOrders, dateFrom, dateTo, dateActive]);
   const filteredClients = pM(() => {
     if (!dateActive) return dashClients;
     return dashClients.filter(c => {
@@ -206,13 +212,12 @@ function DashboardPage() {
   const hour = new Date().getHours();
   const greet = hour < 12 ? t("greeting.morning") : hour < 18 ? t("greeting.day") : t("greeting.evening");
 
-  const customerCount = dateActive ? filteredClients.length : (clientSummary.total_clients ?? dashClients.length);
-  const debtorCount = dateActive ? filteredOrders.length : (dashDebtorTotal ?? debtorSummary.total_debtors ?? data.ordersTotal ?? data.orders.length);
-  const overdueDebt = dateActive
-    ? filteredOrders.reduce((sum, row) => sum + (row.remainingDebtUzs || 0), 0)
-    : (data.orders.length > 0
-      ? data.orders.reduce((sum, row) => sum + (row.remainingDebtUzs || 0), 0)
-      : (debtorSummary.overdue_amount ?? 0));
+  // KPI cards come from the dashboard overview; "—" while it is loading or failed, never a fake 0.
+  const overviewReady = dateActive ? rangeOverviewState === "ready" : !!data.dashboardOverview;
+  const kpiNum = (value) => (overviewReady && value != null ? Number(value) : null);
+  const customerCount = kpiNum(clientSummary.total_clients);
+  const debtorCount = kpiNum(debtorSummary.total_debtors);
+  const overdueDebt = kpiNum(debtorSummary.total_debt_amount); // card label is "Jami qarzdorlik" (remaining debt)
   const activeTasks = data.tasks.filter((task) => {
     if (task.columnSlug === "done" || task.columnSlug === "canceled") return false;
     if (dateActive) {
@@ -225,9 +230,9 @@ function DashboardPage() {
   const taskColumnsById = Object.fromEntries((data.taskColumns || []).map((column) => [column.id, column]));
 
   const heroKpis = [
-    { label: dashTx("kpiCustomers"), value: customerCount, icon: "users", route: "/customers" },
-    { label: dashTx("kpiDebtors"), value: debtorCount, icon: "wallet", route: "/debtors" },
-    { label: dashTx("kpiOverdue"), value: `${fmtShort(overdueDebt)} so'm`, icon: "alert", route: "/debtors" },
+    { label: dashTx("kpiCustomers"), value: customerCount ?? "—", icon: "users", route: "/customers" },
+    { label: dashTx("kpiDebtors"), value: debtorCount ?? "—", icon: "wallet", route: "/debtors" },
+    { label: dashTx("kpiOverdue"), value: overdueDebt != null ? `${fmtShort(overdueDebt)} so'm` : "—", icon: "alert", route: "/debtors" },
     { label: dashTx("kpiActiveTasks"), value: activeTasks.length, icon: "checkCircle", route: "/tasks" },
   ];
 
@@ -235,9 +240,9 @@ function DashboardPage() {
     const colorByName = {};
     dashClients.forEach((c) => { if (c.statusName && c.statusColor) colorByName[c.statusName] = c.statusColor; });
     const fallbackColors = ["#2563eb", "#7c3aed", "#0f766e", "#f59e0b", "#dc2626", "#64748b"];
-    const byStatus = !dateActive ? clientSummary.by_status : null;
+    const byStatus = clientSummary.by_status;
     let rows;
-    if (!dateActive && Array.isArray(byStatus) && byStatus.length) {
+    if (Array.isArray(byStatus) && byStatus.length) {
       rows = byStatus.map((row) => ({
         label: row.status_name || row.label || "",
         value: Number(row.count ?? 0),
@@ -260,46 +265,27 @@ function DashboardPage() {
 
   const debtorTypeData = pM(() => {
     const fallbackColors = { solar_business: "#2563eb", solar_panel: "#2563eb", moto_business: "#f59e0b" };
-    if (dateActive) {
-      const counts = {};
-      filteredOrders.forEach(o => { counts[o.debtorType] = (counts[o.debtorType] || 0) + 1; });
-      return Object.entries(counts).map(([type, count]) => ({
-        label: (type === "solar_business" || type === "solar_panel") ? dashTx("debtorTypeSolar") : dashTx("debtorTypeOld"),
-        value: count,
-        color: fallbackColors[type] || "#06b6d4",
-      }));
-    }
     const rows = dashboardEntries(debtorSummary.by_type, "debtor_type", "count");
     return rows.map((row) => ({
       label: (row.label === "solar_business" || row.label === "solar_panel") ? dashTx("debtorTypeSolar") : row.label === "moto_business" ? dashTx("debtorTypeOld") : row.label,
       value: row.value,
       color: fallbackColors[row.label] || "#06b6d4",
     }));
-  }, [debtorSummary.by_type, filteredOrders, dateActive]);
+  }, [debtorSummary.by_type]);
 
   const debtorStatusData = pM(() => {
-    const hasBalance = filteredOrders.filter(o => Number(o.remainingDebtUzs) > 0 && Number(o.overdueAmountUzs) <= 0).length;
-    const overdue = filteredOrders.filter(o => Number(o.overdueAmountUzs) > 0).length;
-    const closed = filteredOrders.filter(o => Number(o.remainingDebtUzs) <= 0).length;
-    if (hasBalance || overdue || closed) {
-      return [
-        { label: dashTx("debtorHasBalance"), value: hasBalance, color: "#f59e0b" },
-        { label: dashTx("debtorOverdue"),    value: overdue,     color: "#dc2626" },
-        { label: dashTx("debtorClosed"),     value: closed,      color: "#10b981" },
-      ].filter(row => row.value > 0);
-    }
-    const byStatus = debtorSummary.by_status;
-    if (Array.isArray(byStatus) && byStatus.length) {
-      const colorMap = { with_debt: "#f59e0b", overdue: "#dc2626", closed: "#10b981" };
-      const labelMap = { with_debt: dashTx("debtorHasBalance"), overdue: dashTx("debtorOverdue"), closed: dashTx("debtorClosed") };
-      return byStatus.map(row => ({
-        label: labelMap[row.status] || row.status,
-        value: Number(row.count || row.value || 0),
-        color: colorMap[row.status] || "#64748b",
-      })).filter(row => row.value > 0);
-    }
-    return [];
-  }, [debtorSummary.by_status, filteredOrders]);
+    // open includes overdue on the backend, so "has balance" = open − overdue.
+    const bc = debtorStats?.balance_counts;
+    if (!bc) return [];
+    const overdue = Number(bc.overdue || 0);
+    const hasBalance = Math.max(Number(bc.open || 0) - overdue, 0);
+    const closed = Number(bc.closed || 0);
+    return [
+      { label: dashTx("debtorHasBalance"), value: hasBalance, color: "#f59e0b" },
+      { label: dashTx("debtorOverdue"),    value: overdue,     color: "#dc2626" },
+      { label: dashTx("debtorClosed"),     value: closed,      color: "#10b981" },
+    ].filter(row => row.value > 0);
+  }, [debtorStats]);
 
   const accIsDollar = (p) => { const m = String(p.method || p.currency || "").toLowerCase(); return m.includes("dollar") || p.rawCategory === "dollar_income" || p.rawCategory === "dollar_expense"; };
   const dateFilteredPayments = pM(() => {
@@ -339,7 +325,6 @@ function DashboardPage() {
     };
   }, [dateFilteredPayments, dateFrom, dateTo, days]);
 
-  const overdueDebtors = filteredOrders.filter((row) => row.overdueAmountUzs > 0).slice(0, 5);
 
   const upcomingTasks = pM(() => [...data.tasks]
     .filter((task) => {

@@ -31,6 +31,7 @@ const COMMERCE_UI = {
     paymentsDesc: "Kunlik kirim-chiqim va moliyaviy nazorat",
     debtorsDescUnit: "ta qarzdor yozuvi", availableDistricts: "Mavjud tumanlar", addNewDistrict: "Yangi tuman qo'shish", addNewMahalla: "Yangi mahalla qo'shish", districtAdded: "tuman qo'shildi", mahallaAdded: "mahalla qo'shildi",
     availableMahallas: "Mavjud mahallalar", paymentType: "To'lov turi",
+    viewList: "Ro'yxat", viewGrouped: "Tuman/mahalla", noDistrictGroup: "Tuman ko'rsatilmagan", noMahallaGroup: "Mahalla ko'rsatilmagan", showMoreRows: "Yana ko'rsatish", loadFailed: "Ma'lumotni yuklab bo'lmadi", retry: "Qayta urinish",
     tabAll: "Barchasi", tabOpen: "Qoldiq bor", tabOverdue: "Muddati o'tgan", tabClosed: "Yopilgan",
     remainingLabel: "Qoldiq:", overdueLabel: "Muddati o'tgan:",
     debtorsSearch: "Mijoz, telefon, tuman... yoki #raqam", paymentsSearch: "Kategoriya, mijoz, ID...",
@@ -91,6 +92,7 @@ const COMMERCE_UI = {
     paymentsDesc: "Ежедневные доходы-расходы и финансовый контроль",
     debtorsDescUnit: "записей должников", availableDistricts: "Доступные районы", addNewDistrict: "Добавить район", addNewMahalla: "Добавить махаллю", districtAdded: "район добавлен", mahallaAdded: "махалля добавлена",
     availableMahallas: "Доступные махалли", paymentType: "Тип оплаты",
+    viewList: "Список", viewGrouped: "Район/махалля", noDistrictGroup: "Район не указан", noMahallaGroup: "Махалля не указана", showMoreRows: "Показать ещё", loadFailed: "Не удалось загрузить данные", retry: "Повторить",
     tabAll: "Все", tabOpen: "Есть остаток", tabOverdue: "Просрочено", tabClosed: "Закрыто",
     remainingLabel: "Остаток:", overdueLabel: "Просрочено:",
     debtorsSearch: "Клиент, телефон, район... или #номер", paymentsSearch: "Категория, клиент, ID...",
@@ -151,6 +153,7 @@ const COMMERCE_UI = {
     paymentsDesc: "Daily income/expenses and financial control",
     debtorsDescUnit: "debtor records", availableDistricts: "Available districts", addNewDistrict: "Add new district", addNewMahalla: "Add new mahalla", districtAdded: "district added", mahallaAdded: "mahalla added",
     availableMahallas: "Available mahallas", paymentType: "Payment type",
+    viewList: "List", viewGrouped: "District/mahalla", noDistrictGroup: "No district", noMahallaGroup: "No mahalla", showMoreRows: "Show more", loadFailed: "Could not load data", retry: "Retry",
     tabAll: "All", tabOpen: "Has balance", tabOverdue: "Overdue", tabClosed: "Closed",
     remainingLabel: "Balance:", overdueLabel: "Overdue:",
     debtorsSearch: "Customer, phone, district... or #number", paymentsSearch: "Category, customer, ID...",
@@ -363,11 +366,77 @@ OrderRow = function OrderRowPatched({ o, onClick, onEdit, onDelete, onAddPayment
 };
 window.OrderRow = OrderRow;
 
+const ORD_PAGE_SIZE = 50;
+const EMPTY_LOCATION = "__empty__"; // backend filter value for an empty district / neighborhood
+
+// One district/mahalla group from /debtors/groups/. Rows are requested only when the
+// group is opened, one page of 50 at a time, with the same filters as the list.
+function DebtorGroupCard({ title, icon, iconColor, summary, count, filters, renderRow, refreshTick }) {
+  const [open, setOpen] = coS(false);
+  const [rows, setRows] = coS([]);
+  const [page, setPage] = coS(0);
+  const [total, setTotal] = coS(0);
+  const [state, setState] = coS("idle"); // "idle" | "loading" | "ready" | "error"
+  const filtersKey = JSON.stringify(filters);
+  const loadPage = (nextPage, reset) => {
+    setState("loading");
+    return apiGetDebtorsPage({ ...filters, page: nextPage, page_size: ORD_PAGE_SIZE }).then(({ results, count: c }) => {
+      setRows((prev) => (reset ? results : [...prev, ...results]));
+      setTotal(c);
+      setPage(nextPage);
+      setState("ready");
+    }).catch(() => setState("error"));
+  };
+  // Filters or data changed: drop loaded rows; reload page 1 only if the group is open.
+  coE(() => {
+    setRows([]); setPage(0); setTotal(0); setState("idle");
+    if (open) loadPage(1, true);
+  }, [filtersKey, refreshTick]);
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    if (next && state === "idle") loadPage(1, true);
+  };
+  return (
+    <Card style={{ padding: 12 }}>
+      <div onClick={toggle} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", cursor: "pointer", marginBottom: open ? 10 : 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ display: "inline-flex", color: "var(--text-3)", transform: open ? "rotate(90deg)" : "none", transition: "transform .15s" }}><I.chevRight size={14} /></span>
+          <span className="tg-card-icon" style={{ color: `var(--${iconColor})`, background: `var(--${iconColor}-bg)` }}>{icon}</span>
+          <div style={{ fontSize: 14, fontWeight: 720 }}>{title}</div>
+          <Badge color="slate" size="sm">{count} ta</Badge>
+        </div>
+        <div className="tg-cell-sub">{summary}</div>
+      </div>
+      {open && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {rows.map(renderRow)}
+          {state === "loading" && Array.from({ length: rows.length ? 1 : 3 }).map((_, i) => <div key={i} className="skeleton" style={{ height: 76, borderRadius: 14 }} />)}
+          {state === "error" && (
+            <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 10 }}>
+              <span className="tg-cell-sub">{comTx("loadFailed")}</span>
+              <Button variant="ghost" size="sm" onClick={() => loadPage(page + 1, page === 0)}>{comTx("retry")}</Button>
+            </div>
+          )}
+          {state === "ready" && rows.length < total && (
+            <div style={{ display: "flex", justifyContent: "center" }}>
+              <Button variant="ghost" size="sm" onClick={() => loadPage(page + 1, false)}>{`${comTx("showMoreRows")} (${total - rows.length} ta qoldi)`}</Button>
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function OrdersPage() {
   const { data, t, nav, upsert, remove, toast } = useApp();
   const canManage = canDo("accounting.manage", data);
   const [q, setQ] = coS("");
-  const [statusTab, setStatusTab] = coS("all");
+  const [statusTab, setStatusTab] = coS("all"); // "all" | "open" | "overdue" | "closed" | "recall"
+  const [view, setView] = coS("list"); // "list" = server pages of 50 | "grouped" = district/mahalla groups
+  const [groups, setGroups] = coS(null); // /debtors/groups/ response for the grouped view
+  const [groupsState, setGroupsState] = coS("idle"); // "idle" | "loading" | "ready" | "error"
   const [districtFilter, setDistrictFilter] = coS("all");
   const [mahallaFilter, setMahallaFilter] = coS("all");
   const [exporting, setExporting] = coS(false);
@@ -378,7 +447,8 @@ function OrdersPage() {
   const [editOrder, setEditOrder] = coS(null);
   const [deleteOrder, setDeleteOrder] = coS(null);
   const [addPaymentOrder, setAddPaymentOrder] = coS(null);
-  const [ordPage, setOrdPage] = coS(1);
+  // Page number belongs to one filter combination; changing a filter starts again at page 1 without an extra request.
+  const [ordPageState, setOrdPageState] = coS({ key: "", page: 1 });
   const [ordTotal, setOrdTotal] = coS(0);
   const [ordRows, setOrdRows] = coS([]);
   const [ordLoading, setOrdLoading] = coS(false);
@@ -387,63 +457,107 @@ function OrdersPage() {
   const [debtorStatusFilter, setDebtorStatusFilter] = coS("all"); // "all" | "active" | "sud" | "mib"
   const [statusStats, setStatusStats] = coS(null);
   const [statusStatsLoading, setStatusStatsLoading] = coS(true);
+  const [statusStatsError, setStatusStatsError] = coS(false);
+  const [ordError, setOrdError] = coS(false);
 
-  coE(() => { setOrdPage(1); setOrdRows([]); setOrdTotal(0); }, [q, debtorTypeFilter, sourceNumSort, debtorStatusFilter]);
+  // Every filter is sent to the backend; one request = one page of 50 rows.
+  // Cards, tab counts and money totals come from /debtors/stats/, groups from /debtors/groups/.
+  const sourceNumberQuery = q.startsWith("#") ? q.slice(1).trim() : "";
+  const commonParams = {
+    search: q.startsWith("#") ? undefined : q || undefined,
+    source_number: /^\d+$/.test(sourceNumberQuery) ? sourceNumberQuery : undefined,
+    debtor_type: debtorTypeFilter !== "all" ? debtorTypeFilter : undefined,
+    district: districtFilter !== "all" ? districtFilter : undefined,
+    neighborhood: mahallaFilter !== "all" ? mahallaFilter : undefined,
+    date_from: dateFrom || undefined,
+    date_to: dateTo || undefined,
+  };
+  const filterParams = {
+    ...commonParams,
+    status: debtorStatusFilter !== "all" ? debtorStatusFilter : undefined,
+    balance_status: ["open", "overdue", "closed"].includes(statusTab) ? statusTab : undefined,
+    has_recall: statusTab === "recall" ? "true" : undefined,
+  };
+  const listParams = {
+    ...filterParams,
+    ordering: sourceNumSort === "asc" ? "source_number" : sourceNumSort === "desc" ? "-source_number" : undefined,
+  };
+  const statsKey = JSON.stringify(commonParams);
+  const filterKey = JSON.stringify(filterParams);
+  const listKey = JSON.stringify(listParams);
+  const ordPage = ordPageState.key === listKey ? ordPageState.page : 1;
+  const setOrdPage = (page) => setOrdPageState({ key: listKey, page });
 
+  // The table: only the selected page (search waits 300 ms while typing).
   coE(() => {
+    if (view !== "list") return undefined;
     let cancelled = false;
     setOrdLoading(true);
-    apiGetDebtorsPage({
-      page: ordPage,
-      page_size: 50,
-      search: q.startsWith("#") ? undefined : q || undefined,
-      debtor_type: debtorTypeFilter !== "all" ? debtorTypeFilter : undefined,
-      status: debtorStatusFilter !== "all" ? debtorStatusFilter : undefined,
-      ordering: sourceNumSort === "asc" ? "source_number" : sourceNumSort === "desc" ? "-source_number" : undefined,
-    }).then(({ results, count }) => {
-      if (cancelled) return;
-      setOrdRows(results);
-      setOrdTotal(count);
-      setOrdLoading(false);
-    }).catch(() => { if (!cancelled) setOrdLoading(false); });
-    return () => { cancelled = true; };
-  }, [ordPage, q, debtorTypeFilter, sourceNumSort, debtorStatusFilter, listRefreshTick]);
+    setOrdError(false);
+    const timer = setTimeout(() => {
+      apiGetDebtorsPage({ ...listParams, page: ordPage, page_size: ORD_PAGE_SIZE }).then(({ results, count }) => {
+        if (cancelled) return;
+        setOrdRows(results);
+        setOrdTotal(count);
+        setOrdLoading(false);
+      }).catch(() => { if (!cancelled) { setOrdError(true); setOrdLoading(false); } });
+    }, q ? 300 : 0);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [view, ordPage, listKey, listRefreshTick]);
 
-  // Status counts come from the backend; the same list filters (except status itself) narrow the counts
+  // Cards and tab counts. Status (active/sud/mib) and balance tabs are not sent, so all counts stay visible.
   coE(() => {
     let cancelled = false;
     setStatusStatsLoading(true);
-    apiGetDebtorStats({
-      search: q.startsWith("#") ? undefined : q || undefined,
-      debtor_type: debtorTypeFilter !== "all" ? debtorTypeFilter : undefined,
-      district: districtFilter !== "all" ? districtFilter : undefined,
-      neighborhood: mahallaFilter !== "all" ? mahallaFilter : undefined,
-    }).then((res) => {
-      if (cancelled) return;
-      setStatusStats(res);
-      setStatusStatsLoading(false);
-    }).catch(() => { if (!cancelled) setStatusStatsLoading(false); });
-    return () => { cancelled = true; };
-  }, [q, debtorTypeFilter, districtFilter, mahallaFilter, listRefreshTick]);
+    setStatusStatsError(false);
+    const timer = setTimeout(() => {
+      apiGetDebtorStats(commonParams).then((res) => {
+        if (cancelled) return;
+        setStatusStats(res);
+        setStatusStatsError(!res);
+        setStatusStatsLoading(false);
+      });
+    }, q ? 300 : 0);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [statsKey, listRefreshTick]);
 
-  const allOrders = data.orders || [];
-  const districts = coM(() => [...new Set(allOrders.map((order) => orderTuman(order)).filter(Boolean))].sort((a, b) => a.localeCompare(b, "uz")), [allOrders]);
-  const districtOptions = coM(() => districts.map((district) => ({ value: district, label: district })), [districts]);
+  // District → mahalla groups with counts and sums; rows are loaded per group when it is opened.
+  coE(() => {
+    if (view !== "grouped") return undefined;
+    let cancelled = false;
+    setGroupsState("loading");
+    const timer = setTimeout(() => {
+      apiGetDebtorGroups(filterParams).then((res) => {
+        if (cancelled) return;
+        setGroups(res);
+        setGroupsState("ready");
+      }).catch(() => { if (!cancelled) setGroupsState("error"); });
+    }, q ? 300 : 0);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [view, filterKey, listRefreshTick]);
+
+  // District / mahalla options come from the backend district and neighborhood lists.
+  const apiDistrictRows = data.districts || [];
+  const apiNeighborhoodRows = data.neighborhoods || [];
+  const districtOptions = coM(() => {
+    const names = apiDistrictRows.length ? apiDistrictRows.map((d) => d.name) : Object.keys(data.locations || {});
+    return [...new Set(names.filter(Boolean))].sort((a, b) => a.localeCompare(b, "uz")).map((name) => ({ value: name, label: name }));
+  }, [apiDistrictRows, data.locations]);
   const mahallaOptions = coM(() => {
-    const source = districtFilter === "all"
-      ? allOrders
-      : allOrders.filter((order) => orderTuman(order) === districtFilter);
-    return [...new Set(source.map((order) => orderMahalla(order)).filter(Boolean))]
-      .sort((a, b) => a.localeCompare(b, "uz"))
-      .map((mahalla) => ({ value: mahalla, label: mahalla }));
-  }, [allOrders, districtFilter]);
-  const showLocationFilters = statusTab === "all";
-  const showFullGrouped = showLocationFilters && districtFilter === "all" && mahallaFilter === "all";
-  const showDistrictGrouped = showLocationFilters && districtFilter !== "all" && mahallaFilter === "all";
-  const showFlatList = !showLocationFilters || mahallaFilter !== "all" || sourceNumSort !== "all" || !!q;
+    let names;
+    if (apiDistrictRows.length) {
+      const districtIds = districtFilter === "all"
+        ? null
+        : new Set(apiDistrictRows.filter((d) => d.name === districtFilter).map((d) => d.id));
+      names = apiNeighborhoodRows.filter((n) => !districtIds || districtIds.has(n.district)).map((n) => n.name);
+    } else {
+      names = districtFilter === "all" ? Object.values(data.locations || {}).flat() : (data.locations || {})[districtFilter] || [];
+    }
+    return [...new Set(names.filter(Boolean))].sort((a, b) => a.localeCompare(b, "uz")).map((name) => ({ value: name, label: name }));
+  }, [apiDistrictRows, apiNeighborhoodRows, data.locations, districtFilter]);
 
   coE(() => {
-    if (mahallaFilter !== "all" && !mahallaOptions.some((option) => option.value === mahallaFilter)) {
+    if (mahallaFilter !== "all" && mahallaOptions.length && !mahallaOptions.some((option) => option.value === mahallaFilter)) {
       setMahallaFilter("all");
     }
   }, [districtFilter, mahallaFilter, mahallaOptions]);
@@ -469,113 +583,44 @@ function OrdersPage() {
     }
   };
 
-  // allFiltered: client-side filter of all debtors — used for grouped views and tab counts
-  const allFiltered = coM(() => allOrders.filter(o => {
-    if (q) {
-      if (q.startsWith("#")) {
-        const num = q.slice(1);
-        if (!num || o.sourceNumber == null || !String(o.sourceNumber).includes(num)) return false;
-      } else {
-        const term = q.toLowerCase();
-        if (!(o.customerName || "").toLowerCase().includes(term) &&
-            !(o.phone || "").toLowerCase().includes(term) &&
-            !(o.district || "").toLowerCase().includes(term) &&
-            !(o.mahalla || "").toLowerCase().includes(term)) return false;
-      }
-    }
-    if (statusTab === "overdue" && debtNum(o.overdueAmountUzs) <= 0) return false;
-    if (statusTab === "open" && debtNum(o.remainingDebtUzs) <= 0) return false;
-    if (statusTab === "closed" && debtNum(o.remainingDebtUzs) > 0) return false;
-    if (statusTab === "recall" && !o.recallAt) return false;
-    if (debtorStatusFilter !== "all" && debtorStatusOf(o) !== debtorStatusFilter) return false;
-    if (debtorTypeFilter !== "all" && o.debtorType !== debtorTypeFilter && !(debtorTypeFilter === "solar_business" && o.debtorType === "solar_panel")) return false;
-    if (showLocationFilters && districtFilter !== "all" && orderTuman(o) !== districtFilter) return false;
-    if (showLocationFilters && mahallaFilter !== "all" && orderMahalla(o) !== mahallaFilter) return false;
-    if (!orderDateMatchesRange(orderTakenDate(o), dateFrom, dateTo)) return false;
-    return true;
-  }), [allOrders, q, statusTab, showLocationFilters, districtFilter, mahallaFilter, dateFrom, dateTo, debtorStatusFilter, debtorTypeFilter]);
+  // date_from/date_to are sent to the server too; this only guards the current page if the server ignores them.
+  const pageRows = coM(() => ordRows.filter((o) => orderDateMatchesRange(orderTakenDate(o), dateFrom, dateTo)), [ordRows, dateFrom, dateTo]);
 
-  // filtered: server-paginated ordRows — used only for flat table view (statusTab === "all")
-  const filtered = coM(() => ordRows.filter(o => {
-    if (!orderDateMatchesRange(orderTakenDate(o), dateFrom, dateTo)) return false;
-    return true;
-  }), [ordRows, dateFrom, dateTo]);
+  // KPI cards and tab counts come only from the backend stats.
+  const bc = statusStats?.balance_counts || null;
+  const kpi = statusStats ? {
+    totalDebt: debtNum(statusStats.total_debt_amount),
+    overdue: debtNum(statusStats.overdue_amount),
+    credit: Number(statusStats.credit_count ?? 0),
+    districts: Number(statusStats.district_count ?? 0),
+  } : null;
+  const tabCount = (key) => (bc && bc[key] != null ? Number(bc[key]) : undefined);
+  const tabs = [
+    { value: "all", label: comTx("tabAll"), count: tabCount("all") ?? (statusStats ? undefined : ordTotal) },
+    { value: "open", label: comTx("tabOpen"), count: tabCount("open") },
+    { value: "overdue", label: comTx("tabOverdue"), count: tabCount("overdue") },
+    { value: "closed", label: comTx("tabClosed"), count: tabCount("closed") },
+    { value: "recall", label: comTx("tabRecall"), count: tabCount("recall") },
+  ];
 
-  // when a status tab is active, allFiltered (full dataset) is more accurate than ordRows (current server page)
-  const listRows = coM(() => {
-    let base = statusTab !== "all" ? allFiltered : filtered;
-    // #N search is skipped server-side; apply client-side when on "all" tab using ordRows
-    if (q.startsWith("#") && statusTab === "all") {
-      const num = q.slice(1);
-      base = num ? base.filter(o => o.sourceNumber != null && String(o.sourceNumber).includes(num)) : base;
-    }
-    if (sourceNumSort === "all") return base;
-    return [...base].sort((a, b) => {
-      const av = a.sourceNumber ?? Infinity;
-      const bv = b.sourceNumber ?? Infinity;
-      return sourceNumSort === "asc" ? av - bv : bv - av;
-    });
-  }, [statusTab, allFiltered, filtered, sourceNumSort, q]);
+  const groupDistricts = groups?.districts || [];
+  const noDistrict = groups?.no_district && Number(groups.no_district.count) > 0 ? groups.no_district : null;
+  const bodyLoading = view === "grouped" ? groupsState === "loading" || groupsState === "idle" : ordLoading;
+  const bodyError = view === "grouped" ? groupsState === "error" : ordError;
+  const bodyEmpty = view === "grouped" ? !groupDistricts.length && !noDistrict : pageRows.length === 0;
+  const renderOrderRow = (o) => <OrderRow key={o.id} o={o} onClick={() => nav("/debtors/" + o.id)} onEdit={canManage ? () => setEditOrder(o) : undefined} onDelete={canManage ? () => setDeleteOrder(o) : undefined} onAddPayment={canManage ? () => setAddPaymentOrder(o) : undefined} />;
+  const groupSummary = (group) => {
+    const total = debtNum(group.total_debt_amount);
+    const overdue = debtNum(group.overdue_amount);
+    return `${comTx("remainingLabel")} ${fmtUZS(total)}${overdue > 0 ? ` • ${comTx("overdueLabel")} ${fmtUZS(overdue)}` : ""}`;
+  };
+  const kpiValue = (fn) => (kpi ? fn(kpi) : statusStatsLoading ? "…" : "—");
 
-  const grouped = coM(() => {
-    const map = new Map();
-    const ungrouped = [];
-    allFiltered
-      .slice()
-      .sort((a, b) =>
-        orderTuman(a).localeCompare(orderTuman(b), "uz") ||
-        orderMahalla(a).localeCompare(orderMahalla(b), "uz") ||
-        a.customerName.localeCompare(b.customerName, "uz")
-      )
-      .forEach((o) => {
-        const tuman = orderTuman(o);
-        const mahalla = orderMahalla(o);
-        if (!tuman) {
-          ungrouped.push(o);
-          return;
-        }
-        if (!map.has(tuman)) map.set(tuman, new Map());
-        const mahallaMap = map.get(tuman);
-        if (!mahallaMap.has(mahalla || "")) mahallaMap.set(mahalla || "", []);
-        mahallaMap.get(mahalla || "").push(o);
-      });
-    return {
-      located: Array.from(map.entries()).map(([district, mahallaMap]) => {
-        const mahallas = Array.from(mahallaMap.entries()).map(([mahalla, orders]) => ({
-          mahalla,
-          orders,
-          totalDebt: orders.reduce((sum, row) => sum + debtNum(row.remainingDebtUzs), 0),
-          overdueDebt: orders.reduce((sum, row) => sum + debtNum(row.overdueAmountUzs), 0),
-        }));
-        return {
-          district,
-          mahallas,
-          orders: mahallas.flatMap(group => group.orders).sort((a, b) =>
-            orderMahalla(a).localeCompare(orderMahalla(b), "uz") ||
-            a.customerName.localeCompare(b.customerName, "uz")
-          ),
-          totalDebt: mahallas.reduce((sum, group) => sum + group.totalDebt, 0),
-          overdueDebt: mahallas.reduce((sum, group) => sum + group.overdueDebt, 0),
-        };
-      }),
-      ungrouped,
-    };
-  }, [allFiltered]);
-
-  const totalDebt = allOrders.reduce((sum, o) => sum + debtNum(o.remainingDebtUzs), 0);
-  const overdue = allOrders.reduce((sum, o) => sum + debtNum(o.overdueAmountUzs), 0);
   const statusCount = (key) => {
     const value = statusStats?.[key === "total" ? "total" : `${key}_count`];
     return value != null ? fmtNum(Number(value)) : "—";
   };
   const toggleStatusFilter = (value) => setDebtorStatusFilter((current) => (current === value ? "all" : value));
-  const tabs = [
-    { value: "all", label: comTx("tabAll"), count: ordTotal },
-    { value: "open", label: comTx("tabOpen"), count: allOrders.filter(o => debtNum(o.remainingDebtUzs) > 0).length },
-    { value: "overdue", label: comTx("tabOverdue"), count: allOrders.filter(o => debtNum(o.overdueAmountUzs) > 0).length },
-    { value: "closed", label: comTx("tabClosed"), count: allOrders.filter(o => debtNum(o.remainingDebtUzs) === 0).length },
-    { value: "recall", label: comTx("tabRecall"), count: allOrders.filter(o => !!o.recallAt).length },
-  ];
 
   return (
     <div className="page fade-in">
@@ -584,10 +629,10 @@ function OrdersPage() {
           <Button variant="primary" size="sm" icon={<I.plus size={15} />} onClick={() => setCreateOpen(true)}>{comTx("newDebtor")}</Button>
         </>} />
       <div className="grid-kpi" style={{ marginBottom: 18 }}>
-        <StatTile label={comTx("totalDebtKpi")} value={fmtShort(totalDebt)} sub="so'm" color="red" />
-        <StatTile label={comTx("tabOverdue")} value={fmtShort(overdue)} sub="so'm" color="amber" />
-        <StatTile label={comTx("creditCustomers")} value={allOrders.filter(o => o.paymentType === "credit").length} color="blue" />
-        <StatTile label={comTx("districts")} value={new Set(allOrders.map(o => orderTuman(o)).filter(Boolean)).size} color="violet" />
+        <StatTile label={comTx("totalDebtKpi")} value={kpiValue((k) => fmtShort(k.totalDebt))} sub="so'm" color="red" />
+        <StatTile label={comTx("tabOverdue")} value={kpiValue((k) => fmtShort(k.overdue))} sub="so'm" color="amber" />
+        <StatTile label={comTx("creditCustomers")} value={kpiValue((k) => k.credit)} color="blue" />
+        <StatTile label={comTx("districts")} value={kpiValue((k) => k.districts)} color="violet" />
       </div>
       <div className="debtor-status-cards" style={{ marginBottom: 18 }} title={comTx("statusCardsHint")}>
         <DebtorStatusCard label={comTx("kpiTotalDebtors")} value={statusCount("total")} color="blue" icon="users" active={debtorStatusFilter === "all"} loading={statusStatsLoading} onClick={() => setDebtorStatusFilter("all")} />
@@ -599,8 +644,8 @@ function OrdersPage() {
         <SearchInput value={q} onChange={setQ} placeholder={comTx("debtorsSearch")} width={260} />
         <FilterSelect label={comTx("filterDebtorType")} icon="layers" value={debtorTypeFilter} onChange={setDebtorTypeFilter} options={[{ value: "moto_business", label: comTx("oldBiz") }, { value: "solar_business", label: comTx("solar") }]} />
         <FilterSelect label={comTx("debtorStatus")} icon="shield" value={debtorStatusFilter} onChange={setDebtorStatusFilter} options={debtorStatusOptions()} />
-        {showLocationFilters && <FilterSelect label={comTx("colDistrict")} icon="mapPin" value={districtFilter} onChange={setDistrictFilter} options={districtOptions} />}
-        {showLocationFilters && <FilterSelect label={comTx("colMahalla")} icon="home" value={mahallaFilter} onChange={setMahallaFilter} options={mahallaOptions} />}
+        <FilterSelect label={comTx("colDistrict")} icon="mapPin" value={districtFilter} onChange={(v) => { setDistrictFilter(v); setMahallaFilter("all"); }} options={districtOptions} />
+        <FilterSelect label={comTx("colMahalla")} icon="home" value={mahallaFilter} onChange={setMahallaFilter} options={mahallaOptions} />
         <div style={{ width: 170 }}><DatePickerInput value={dateFrom} onChange={setDateFrom} placeholder={comTx("startDate")} /></div>
         <div style={{ width: 170 }}><DatePickerInput value={dateTo} onChange={setDateTo} placeholder={comTx("endDate")} /></div>
         {(dateFrom || dateTo) ? <Button variant="ghost" size="sm" onClick={() => { setDateFrom(""); setDateTo(""); }}>{comTx("clear")}</Button> : null}
@@ -608,97 +653,84 @@ function OrdersPage() {
         <div className="toolbar-spacer" />
         <Button variant="default" size="sm" icon={<I.download size={15} />} onClick={exportDebtorsExcel} disabled={exporting}>Excel</Button>
       </div>
-      <div style={{ marginBottom: 16 }}><Tabs tabs={tabs} active={statusTab} onChange={setStatusTab} /></div>
-      {ordLoading ? (
+      <div style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <Tabs tabs={tabs} active={statusTab} onChange={setStatusTab} />
+        <div className="toolbar-spacer" />
+        <Segmented value={view} onChange={setView} options={[{ value: "list", label: comTx("viewList"), icon: <I.list size={14} /> }, { value: "grouped", label: comTx("viewGrouped"), icon: <I.mapPin size={14} /> }]} />
+      </div>
+      {bodyLoading ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {Array.from({ length: 5 }).map((_, i) => <div key={i} className="skeleton" style={{ height: 76, borderRadius: 14 }} />)}
         </div>
-      ) : (showFlatList ? listRows : allFiltered).length === 0 ? (
+      ) : bodyError ? (
+        <Card><EmptyState icon={<I.alert size={26} />} title={comTx("loadFailed")} action={<Button onClick={() => setListRefreshTick((n) => n + 1)}>{comTx("retry")}</Button>} /></Card>
+      ) : bodyEmpty ? (
         <Card><EmptyState icon={<I.wallet size={26} />} title={(dateFrom || dateTo) ? comTx("noDateData") : comTx("emptyDebtors")} /></Card>
-      ) : showFlatList ? (
-        <Card pad={false}>
-          <DataTable
-            columns={[
-              { key: "sourceNum", label: comTx("colSourceNum"), sortVal: (row) => row.sourceNumber ?? Infinity, render: (row) => row.sourceNumber != null ? <span style={{ fontWeight: 700, color: "var(--text-2)" }}>#{row.sourceNumber}</span> : <span className="tg-cell-sub">—</span> },
-              { key: "name", label: comTx("colCustomer"), sortVal: (row) => row.customerName, render: (row) => <div><div className="tg-cell-strong">{row.customerName}</div><div className="tg-cell-sub">{row.phone || "—"}</div></div> },
-              { key: "district", label: comTx("colDistrict"), sortVal: (row) => orderTuman(row), render: (row) => orderTuman(row) || <span className="tg-cell-sub">—</span> },
-              { key: "mahalla", label: comTx("colMahalla"), sortVal: (row) => orderMahalla(row), render: (row) => orderMahalla(row) || <span className="tg-cell-sub">—</span> },
-              { key: "type", label: comTx("filterDebtorType"), sortVal: (row) => row.debtorType || "", render: (row) => (row.debtorType === "solar_business" || row.debtorType === "solar_panel") ? <Badge color="blue" size="sm">{comTx("solar")}</Badge> : row.debtorType === "moto_business" ? <Badge color="amber" size="sm">{comTx("oldBiz")}</Badge> : <span className="tg-cell-sub">—</span> },
-              { key: "debtorStatus", label: comTx("debtorStatus"), sortVal: (row) => ({ active: 0, sud: 1, mib: 2 })[debtorStatusOf(row)], render: (row) => <DebtorStatusBadge value={debtorStatusOf(row)} /> },
-              { key: "status", label: comTx("colStatus"), sortVal: (row) => debtNum(row.overdueAmountUzs) > 0 ? 2 : debtNum(row.remainingDebtUzs) > 0 ? 1 : 0, render: (row) => { const ov = debtNum(row.overdueAmountUzs); const rem = debtNum(row.remainingDebtUzs); return <Badge color={ov > 0 ? "red" : rem > 0 ? "amber" : "green"} size="sm">{ov > 0 ? comTx("overdue") : rem > 0 ? comTx("withDebt") : comTx("closed")}</Badge>; } },
-              { key: "debt", label: comTx("colDebt"), sortVal: (row) => debtNum(row.remainingDebtUzs), render: (row) => <span style={{ fontWeight: 700 }}>{rawDebt(row.remainingDebtUzs) ?? "—"}</span> },
-            ]}
-            rows={listRows}
-            rowTone={debtorTone}
-            onRowClick={(row) => nav("/debtors/" + row.id)}
-            defaultSort={{ key: "debt", dir: "desc" }}
-          />
-          {statusTab === "all" && <PaginationBar page={ordPage} total={ordTotal} pageSize={50} onChange={setOrdPage} />}
-        </Card>
-      ) : showDistrictGrouped ? (
+      ) : view === "grouped" ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-          {grouped.located.map(group => (
-            <Card key={group.district} style={{ padding: 14 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap", marginBottom: 12 }}>
-                <div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span className="tg-card-icon" style={{ color: "var(--blue)", background: "var(--blue-bg)" }}><I.mapPin size={15} /></span>
-                    <div style={{ fontSize: 16, fontWeight: 760 }}>{group.district}</div>
-                    <Badge color="slate" size="sm">{group.orders.length} ta</Badge>
-                  </div>
-                  <div className="tg-cell-sub" style={{ marginTop: 4 }}>
-                    {comTx("remainingLabel")} {fmtUZS(group.totalDebt)}{group.overdueDebt > 0 ? ` • ${comTx("overdueLabel")} ${fmtUZS(group.overdueDebt)}` : ""}
-                  </div>
-                </div>
-              </div>
-              <ShowMoreList items={group.orders} step={20} gap={12} render={o => <OrderRow key={o.id} o={o} onClick={() => nav("/debtors/" + o.id)} onEdit={canManage ? () => setEditOrder(o) : undefined} onDelete={canManage ? () => setDeleteOrder(o) : undefined} onAddPayment={canManage ? () => setAddPaymentOrder(o) : undefined} />} />
-            </Card>
-          ))}
-          {!!grouped.ungrouped.length && (
-            <ShowMoreList items={grouped.ungrouped} step={20} gap={12} render={o => <OrderRow key={o.id} o={o} onClick={() => nav("/debtors/" + o.id)} onEdit={canManage ? () => setEditOrder(o) : undefined} onDelete={canManage ? () => setDeleteOrder(o) : undefined} onAddPayment={canManage ? () => setAddPaymentOrder(o) : undefined} />} />
-          )}
-        </div>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-          {grouped.located.map(group => (
+          {groupDistricts.map((group) => (
             <div key={group.district}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap", marginBottom: 10 }}>
                 <div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <span className="tg-card-icon" style={{ color: "var(--blue)", background: "var(--blue-bg)" }}><I.mapPin size={15} /></span>
                     <div style={{ fontSize: 16, fontWeight: 760 }}>{group.district}</div>
-                    <Badge color="slate" size="sm">{group.orders.length} ta</Badge>
+                    <Badge color="slate" size="sm">{Number(group.count || 0)} ta</Badge>
                   </div>
-                  <div className="tg-cell-sub" style={{ marginTop: 4 }}>
-                    {comTx("remainingLabel")} {fmtUZS(group.totalDebt)}{group.overdueDebt > 0 ? ` • ${comTx("overdueLabel")} ${fmtUZS(group.overdueDebt)}` : ""}
-                  </div>
+                  <div className="tg-cell-sub" style={{ marginTop: 4 }}>{groupSummary(group)}</div>
                 </div>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                {group.mahallas.map((mahallaGroup) => (
-                  <Card key={`${group.district}_${mahallaGroup.mahalla || "no_mahalla"}`} style={{ padding: 12 }}>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
-                      {mahallaGroup.mahalla ? (
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <span className="tg-card-icon" style={{ color: "var(--violet)", background: "var(--violet-bg)" }}><I.home size={14} /></span>
-                          <div style={{ fontSize: 14, fontWeight: 720 }}>{mahallaGroup.mahalla}</div>
-                          <Badge color="slate" size="sm">{mahallaGroup.orders.length} ta</Badge>
-                        </div>
-                      ) : <div />}
-                      <div className="tg-cell-sub">
-                        {comTx("remainingLabel")} {fmtUZS(mahallaGroup.totalDebt)}{mahallaGroup.overdueDebt > 0 ? ` • ${comTx("overdueLabel")} ${fmtUZS(mahallaGroup.overdueDebt)}` : ""}
-                      </div>
-                    </div>
-                    <ShowMoreList items={mahallaGroup.orders} step={20} gap={12} render={o => <OrderRow key={o.id} o={o} onClick={() => nav("/debtors/" + o.id)} onEdit={canManage ? () => setEditOrder(o) : undefined} onDelete={canManage ? () => setDeleteOrder(o) : undefined} onAddPayment={canManage ? () => setAddPaymentOrder(o) : undefined} />} />
-                  </Card>
+                {(group.neighborhoods || []).map((mahallaGroup) => (
+                  <DebtorGroupCard
+                    key={`${group.district}_${mahallaGroup.neighborhood || "no_mahalla"}`}
+                    title={mahallaGroup.neighborhood || comTx("noMahallaGroup")}
+                    icon={<I.home size={14} />}
+                    iconColor="violet"
+                    count={Number(mahallaGroup.count || 0)}
+                    summary={groupSummary(mahallaGroup)}
+                    filters={{ ...filterParams, ordering: listParams.ordering, district: group.district, neighborhood: mahallaGroup.neighborhood || EMPTY_LOCATION }}
+                    renderRow={renderOrderRow}
+                    refreshTick={listRefreshTick}
+                  />
                 ))}
               </div>
             </div>
           ))}
-          {!!grouped.ungrouped.length && (
-            <ShowMoreList items={grouped.ungrouped} step={20} gap={12} render={o => <OrderRow key={o.id} o={o} onClick={() => nav("/debtors/" + o.id)} onEdit={canManage ? () => setEditOrder(o) : undefined} onDelete={canManage ? () => setDeleteOrder(o) : undefined} onAddPayment={canManage ? () => setAddPaymentOrder(o) : undefined} />} />
+          {noDistrict && (
+            <DebtorGroupCard
+              title={comTx("noDistrictGroup")}
+              icon={<I.mapPin size={14} />}
+              iconColor="blue"
+              count={Number(noDistrict.count || 0)}
+              summary={groupSummary(noDistrict)}
+              filters={{ ...filterParams, ordering: listParams.ordering, district: EMPTY_LOCATION, neighborhood: undefined }}
+              renderRow={renderOrderRow}
+              refreshTick={listRefreshTick}
+            />
           )}
         </div>
+      ) : (
+        <Card pad={false}>
+          <DataTable
+            columns={[
+              { key: "sourceNum", label: comTx("colSourceNum"), render: (row) => row.sourceNumber != null ? <span style={{ fontWeight: 700, color: "var(--text-2)" }}>#{row.sourceNumber}</span> : <span className="tg-cell-sub">—</span> },
+              { key: "name", label: comTx("colCustomer"), render: (row) => <div><div className="tg-cell-strong">{row.customerName}</div><div className="tg-cell-sub">{row.phone || "—"}</div></div> },
+              { key: "district", label: comTx("colDistrict"), render: (row) => orderTuman(row) || <span className="tg-cell-sub">—</span> },
+              { key: "mahalla", label: comTx("colMahalla"), render: (row) => orderMahalla(row) || <span className="tg-cell-sub">—</span> },
+              { key: "type", label: comTx("filterDebtorType"), render: (row) => (row.debtorType === "solar_business" || row.debtorType === "solar_panel") ? <Badge color="blue" size="sm">{comTx("solar")}</Badge> : row.debtorType === "moto_business" ? <Badge color="amber" size="sm">{comTx("oldBiz")}</Badge> : <span className="tg-cell-sub">—</span> },
+              { key: "debtorStatus", label: comTx("debtorStatus"), render: (row) => <DebtorStatusBadge value={debtorStatusOf(row)} /> },
+              { key: "status", label: comTx("colStatus"), render: (row) => { const ov = debtNum(row.overdueAmountUzs); const rem = debtNum(row.remainingDebtUzs); return <Badge color={ov > 0 ? "red" : rem > 0 ? "amber" : "green"} size="sm">{ov > 0 ? comTx("overdue") : rem > 0 ? comTx("withDebt") : comTx("closed")}</Badge>; } },
+              { key: "debt", label: comTx("colDebt"), render: (row) => <span style={{ fontWeight: 700 }}>{rawDebt(row.remainingDebtUzs) ?? "—"}</span> },
+            ]}
+            rows={pageRows}
+            rowTone={debtorTone}
+            onRowClick={(row) => nav("/debtors/" + row.id)}
+            defaultSort={null}
+            pageSize={ORD_PAGE_SIZE}
+          />
+          <PaginationBar page={ordPage} total={ordTotal} pageSize={ORD_PAGE_SIZE} onChange={setOrdPage} />
+        </Card>
       )}
       <OrderFormModal
         open={createOpen}
@@ -740,6 +772,7 @@ function OrdersPage() {
           await remove("orders", deleteOrder.id);
           toast(comTx("debtorDeleted"));
           setDeleteOrder(null);
+          setListRefreshTick(t => t + 1);
         }}
         title={comTx("deleteDebtorTitle")}
         message={`"${deleteOrder?.customerName || ""}" yozuvini o'chirmoqchimisiz?`}
@@ -841,7 +874,15 @@ function OrderFormModal({ open, onClose, onSave, initial, locations }) {
           const paidUzs = +form.paidUzs || 0;
           const overdueAmountUzs = +form.overdueAmountUzs || 0;
           const remainingDebtUzs = Math.max(0, totalUzs - paidUzs);
-          const linkedCustomer = data.customers.find(c => c.fullName.toLowerCase() === (form.customerName || "").trim().toLowerCase());
+          const nameKey = (form.customerName || "").trim().toLowerCase();
+          // Find the matching client on the server instead of keeping every client in memory.
+          let linkedCustomer = (data.customers || []).find(c => c.fullName.toLowerCase() === nameKey);
+          if (!linkedCustomer && nameKey) {
+            try {
+              const found = await apiGetClientsPage({ page: 1, page_size: 20, search: (form.customerName || "").trim() });
+              linkedCustomer = found.results.find(c => (c.fullName || "").toLowerCase() === nameKey);
+            } catch { linkedCustomer = undefined; }
+          }
           const linkedLead = data.leads.find(l => l.fullName.toLowerCase() === (form.customerName || "").trim().toLowerCase());
           await onSave({
             ...form,
@@ -1275,8 +1316,9 @@ function OrderDetailPage({ id }) {
   const [detailPayments, setDetailPayments] = coS([]);
   const [refreshTick, setRefreshTick] = coS(0);
 
+  const [detailLoading, setDetailLoading] = coS(true);
   coE(() => {
-    apiGetDebtorById(id).then(o => { if (o) setDetailOrder(o); }).catch(() => {});
+    apiGetDebtorById(id).then(o => { if (o) setDetailOrder(o); }).catch(() => {}).finally(() => setDetailLoading(false));
   }, [id, refreshTick]);
 
   coE(() => {
@@ -1290,6 +1332,7 @@ function OrderDetailPage({ id }) {
   const refresh = () => setRefreshTick(t => t + 1);
 
   const cust = detailCust;
+  if (!o && detailLoading) return <div className="page"><Card><SkeletonRows rows={6} cols={3} /></Card></div>;
   if (!o) return <div className="page"><Card><EmptyState title={comTx("debtorNotFound")} action={<Button onClick={() => nav("/debtors")}>{comTx("backToDebtors")}</Button>} /></Card></div>;
   const payments = detailPayments;
 

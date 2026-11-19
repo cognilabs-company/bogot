@@ -486,6 +486,8 @@ function StatusColorBadge({ label, color, tone = "blue", suffix = null }) {
   return <Badge color={tone} size="sm">{label}{suffix}</Badge>;
 }
 
+const CUS_PAGE_SIZE = 50;
+
 function CustomersPage() {
   const { data, t, nav, upsert, remove, toast } = useApp();
   const canManage = canDo("clients.manage", data);
@@ -505,21 +507,31 @@ function CustomersPage() {
   const [editCustomer, setEditCustomer] = cuS(null);
   const [addOpen, setAddOpen] = cuS(false);
   const [deleteCustomer, setDeleteCustomer] = cuS(null);
-  const [cusPage, setCusPage] = cuS(1);
+  const [cusPageState, setCusPageState] = cuS({ key: "", page: 1 });
   const [cusTotal, setCusTotal] = cuS(0);
   const [cusRows, setCusRows] = cuS([]);
   const [cusLoading, setCusLoading] = cuS(false);
+  const [cusRefreshTick, setCusRefreshTick] = cuS(0);
 
-  cuE(() => { setCusPage(1); }, [q]);
+  // Page number belongs to one filter combination; changing a filter starts again at page 1 without an extra request.
+  const cusFilterKey = JSON.stringify([q, fDistrict, fMahalla, fStatus, dateFrom, dateTo]);
+  const cusPage = cusPageState.key === cusFilterKey ? cusPageState.page : 1;
+  const setCusPage = (page) => setCusPageState({ key: cusFilterKey, page });
 
+  // Filters go to the backend; each page button requests exactly that page.
   cuE(() => {
     let cancelled = false;
     setCusLoading(true);
     apiGetClientsPage({
       page: cusPage,
-      page_size: 50,
+      page_size: CUS_PAGE_SIZE,
       search: q || undefined,
       ordering: "-created_at",
+      district: fDistrict !== "all" ? fDistrict : undefined,
+      neighborhood: fMahalla !== "all" ? fMahalla : undefined,
+      status: fStatus !== "all" ? fStatus : undefined,
+      created_at_after: dateFrom || undefined,
+      created_at_before: dateTo || undefined,
     }).then(({ results, count }) => {
       if (cancelled) return;
       setCusRows(results);
@@ -527,7 +539,7 @@ function CustomersPage() {
       setCusLoading(false);
     }).catch(() => { if (!cancelled) setCusLoading(false); });
     return () => { cancelled = true; };
-  }, [cusPage, q]);
+  }, [cusPage, q, fDistrict, fMahalla, fStatus, dateFrom, dateTo, cusRefreshTick]);
 
   const districts = customerDistrictOptions(data.locations);
   const mahallaOptions = cuM(() => {
@@ -579,7 +591,14 @@ function CustomersPage() {
     ) },
   ];
 
-  const statusUsageCount = (statusId) => cusRows.filter((customer) => customer.statusId === statusId).length;
+  // Counts come from `clients_count` on /clients/statuses/ (all clients, not just this page).
+  const statusUsageCount = (statusId) => {
+    const status = (data.clientStatuses || []).find((row) => row.id === statusId);
+    return status?.clientsCount ?? cusRows.filter((customer) => customer.statusId === statusId).length;
+  };
+  const customersWithStatusCount = sortedStatuses.every((status) => status.clientsCount != null)
+    ? sortedStatuses.reduce((sum, status) => sum + status.clientsCount, 0)
+    : cusRows.filter((customer) => customer.statusId).length;
 
   const openStatusCreate = () => {
     setEditStatus(null);
@@ -728,8 +747,8 @@ function CustomersPage() {
           <Card pad={false}>
             {cusLoading ? <SkeletonRows rows={10} cols={7} /> : filtered.length === 0 ? (
               <EmptyState icon={<I.users size={26} />} title={(dateFrom || dateTo) ? ctx("noDateData") : ctx("noCustomers")} />
-            ) : <DataTable columns={columns} rows={filtered} onRowClick={r => setViewCustomer(r)} defaultSort={null} rowTone={customerRowTone} />}
-            {!cusLoading && filtered.length > 0 && <PaginationBar page={cusPage} total={cusTotal} pageSize={50} onChange={setCusPage} />}
+            ) : <DataTable columns={columns} rows={filtered} onRowClick={r => setViewCustomer(r)} defaultSort={null} rowTone={customerRowTone} pageSize={CUS_PAGE_SIZE} />}
+            {!cusLoading && filtered.length > 0 && <PaginationBar page={cusPage} total={cusTotal} pageSize={CUS_PAGE_SIZE} onChange={setCusPage} />}
           </Card>
         </>
       )}
@@ -738,7 +757,7 @@ function CustomersPage() {
           <div className="grid-3">
             <StatTile label={ctx("totalStatuses")} value={sortedStatuses.length} color="blue" />
             <StatTile label={ctx("defaultStatus")} value={defaultClientStatus || ctx("noValue")} color="green" />
-            <StatTile label={ctx("customersWithStatus")} value={cusRows.filter((customer) => customer.statusId).length} color="amber" />
+            <StatTile label={ctx("customersWithStatus")} value={customersWithStatusCount} color="amber" />
           </div>
           <Card pad={false}>
             <DataTable columns={statusColumns} rows={sortedStatuses} onRowClick={openStatusEdit} defaultSort={{ key: "order", dir: "asc" }} rowTone={(row) => row.color || (row.isDefault ? "green" : "blue")} />
@@ -768,6 +787,7 @@ function CustomersPage() {
           await upsert("customers", customer);
           toast(ctx("customerAdded"));
           setAddOpen(false);
+          setCusRefreshTick((n) => n + 1);
         }}
         locations={data.locations}
       />
@@ -779,6 +799,7 @@ function CustomersPage() {
           await upsert("customers", customer);
           toast(ctx("customerUpdated"));
           setEditCustomer(null);
+          setCusRefreshTick((n) => n + 1);
         }}
         locations={data.locations}
       />
@@ -789,6 +810,7 @@ function CustomersPage() {
           await remove("customers", deleteCustomer.id);
           toast(ctx("customerDeleted"));
           setDeleteCustomer(null);
+          setCusRefreshTick((n) => n + 1);
         }}
         title={ctx("deleteCustomer")}
         message={customerLang() === "uz" ? `"${deleteCustomer?.fullName || ""}" ${ctx("deleteCustomerMessage")}` : ctx("deleteCustomerMessage")}
@@ -1174,8 +1196,11 @@ function CustomerDetailPage({ id }) {
   const [detailDebtor, setDetailDebtor] = cuS(null);
   const [detailLedger, setDetailLedger] = cuS([]);
   const [tab, setTab] = cuS("overview");
+  const [detailLoading, setDetailLoading] = cuS(true);
   cuE(() => {
+    setDetailLoading(true);
     apiGetClientById(id).then(c => {
+      setDetailLoading(false);
       if (!c) return;
       setDetailCustomer(c);
       apiGetDebtorsPage({ page: 1, page_size: 1, search: c.fullName }).then(r => { if (r.results.length) setDetailDebtor(r.results[0]); }).catch(() => {});
@@ -1183,9 +1208,10 @@ function CustomerDetailPage({ id }) {
         const dayMap = Object.fromEntries((data.accountingDays || []).map(d => [d.id, d]));
         setDetailLedger((r.results || []).map(e => mapApiAccountingEntry(e, dayMap)));
       }).catch(() => {});
-    }).catch(() => {});
+    }).catch(() => setDetailLoading(false));
   }, [id]);
-  const c = detailCustomer || data.customers.find(x => x.id === id);
+  const c = detailCustomer || (data.customers || []).find(x => x.id === id);
+  if (!c && detailLoading) return <div className="page"><Card><SkeletonRows rows={6} cols={3} /></Card></div>;
   if (!c) return <div className="page"><Card><EmptyState title={ctx("customerNotFound")} action={<Button onClick={() => nav("/customers")}>{ctx("toCustomers")}</Button>} /></Card></div>;
 
   const debtor = detailDebtor;

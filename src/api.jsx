@@ -413,15 +413,15 @@ async function apiDownloadAccountingExcel(filters = {}) {
 }
 
 async function apiGetClientsPage(params = {}) {
-  const { page = 1, page_size = 50, search, ordering, created_at_after, created_at_before } = params;
-  const url = apiBuildUrl("/api/clients/", { page, page_size, search, ordering, created_at_after, created_at_before });
+  const { page = 1, page_size = 50, search, ordering, created_at_after, created_at_before, district, neighborhood, status } = params;
+  const url = apiBuildUrl("/api/clients/", { page, page_size, search, ordering, created_at_after, created_at_before, district, neighborhood, status });
   const res = apiUnwrap(await apiRequest(url, { auth: true }));
   return { results: (res?.results || []).map(mapApiClient), count: res?.count || 0 };
 }
 
 async function apiGetDebtorsPage(params = {}) {
-  const { page = 1, page_size = 50, search, debtor_type, district, neighborhood, ordering, status } = params;
-  const url = apiBuildUrl("/api/clients/debtors/", { page, page_size, search, debtor_type, district, neighborhood, ordering, status });
+  const { page = 1, page_size = 50, search, source_number, debtor_type, district, neighborhood, ordering, status, date_from, date_to, balance_status, has_recall } = params;
+  const url = apiBuildUrl("/api/clients/debtors/", { page, page_size, search, source_number, debtor_type, district, neighborhood, ordering, status, date_from, date_to, balance_status, has_recall });
   const res = apiUnwrap(await apiRequest(url, { auth: true }));
   return { results: (res?.results || []).map(mapApiDebtor), count: res?.count || 0 };
 }
@@ -452,6 +452,21 @@ async function apiGetDebtorStats(params = {}) {
     const url = apiBuildUrl("/api/clients/debtors/stats/", params);
     return apiUnwrap(await apiRequest(url, { auth: true })) || null;
   } catch { return null; }
+}
+
+// District → mahalla groups with count / remaining debt / overdue debt (no debtor rows).
+// Throws on error so the page can show an error instead of empty groups.
+async function apiGetDebtorGroups(params = {}) {
+  const { search, source_number, debtor_type, city, district, neighborhood, status, date_from, date_to, balance_status, has_recall } = params;
+  const url = apiBuildUrl("/api/clients/debtors/groups/", { search, source_number, debtor_type, city, district, neighborhood, status, date_from, date_to, balance_status, has_recall });
+  return apiUnwrap(await apiRequest(url, { auth: true })) || { districts: [], no_district: null };
+}
+
+// Dashboard totals for a date range (filters client/debtor created_at on the backend).
+async function apiGetDashboardOverview(params = {}) {
+  const { date_from, date_to } = params;
+  const url = apiBuildUrl("/api/dashboard/overview/", { date_from, date_to });
+  return apiUnwrap(await apiRequest(url, { auth: true })) || null;
 }
 
 async function apiGetDebtorById(id) {
@@ -684,6 +699,8 @@ function mapApiClientStatus(status) {
     color: status.color || "",
     isDefault: !!status.is_default,
     sortOrder: status.sort_order || 0,
+    // Number of all clients with this status (backend count, not the current page).
+    clientsCount: status.clients_count != null ? Number(status.clients_count) : null,
   };
 }
 
@@ -1593,6 +1610,8 @@ Object.assign(window, {
   apiGetClientById,
   apiGetDebtorById,
   apiGetDebtorStats,
+  apiGetDebtorGroups,
+  apiGetDashboardOverview,
   DEBTOR_STATUSES,
   apiGetDebtorPayments,
   apiSaveDebtorPayment,
