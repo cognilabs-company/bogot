@@ -58,7 +58,7 @@ function AreaChart({ series, height = 220, color = "var(--accent)", labels, form
           const yy = y(v);
           return <g key={i}>
             <line x1={padL} x2={w - padR} y1={yy} y2={yy} stroke="var(--border-soft)" strokeWidth="1" />
-            <text x={padL - 8} y={yy + 4} textAnchor="end" fontSize="10.5" fill="var(--text-3)">{fmtCompact(Math.round(v))}</text>
+            <text x={padL - 8} y={yy + 4} textAnchor="end" fontSize="10.5" fill="var(--text-3)">{fmtCompact(v)}</text>
           </g>;
         })}
         {area && <path d={areaPath} fill={`url(#${gid})`}
@@ -80,8 +80,16 @@ function AreaChart({ series, height = 220, color = "var(--accent)", labels, form
         ))}
         {hover != null && (
           <g>
-            <rect x={Math.min(Math.max(x(hover) - 46, 2), w - 94)} y={Math.max(y(data[hover]) - 40, 2)} width="92" height="30" rx="7" fill="var(--elevated)" stroke="var(--border)" />
-            <text x={Math.min(Math.max(x(hover) - 46, 2), w - 94) + 46} y={Math.max(y(data[hover]) - 40, 2) + 19} textAnchor="middle" fontSize="11.5" fontWeight="650" fill="var(--text)">{format(data[hover])}</text>
+            {(() => {
+              const label = String(format(data[hover]));
+              const tw = Math.max(92, label.length * 7 + 20);
+              const tx = Math.min(Math.max(x(hover) - tw / 2, 2), w - tw - 2);
+              const ty = Math.max(y(data[hover]) - 40, 2);
+              return <>
+                <rect x={tx} y={ty} width={tw} height="30" rx="7" fill="var(--elevated)" stroke="var(--border)" />
+                <text x={tx + tw / 2} y={ty + 19} textAnchor="middle" fontSize="11.5" fontWeight="650" fill="var(--text)">{label}</text>
+              </>;
+            })()}
           </g>
         )}
       </svg>

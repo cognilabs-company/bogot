@@ -5,7 +5,7 @@ const DASHBOARD_UI = {
     heroSub: "Bogot Armada NRG ichki CRM • mijozlar, vazifalar, qarzdorlar va hisob-kitob bitta panelda",
     kpiCustomers: "Jami mijozlar", kpiDebtors: "Qarzdorlar",
     kpiOverdue: "Jami qarzdorlik", kpiActiveTasks: "Faol vazifalar",
-    panelCashflow: "Pul oqimi tendensiyasi", panelCashflowSub: "Kirim minus chiqim (mln so'm)",
+    panelCashflow: "Pul oqimi tendensiyasi", panelCashflowSub: "Kirim minus chiqim (so'm)",
     panelStatus: "Mijoz holatlari", panelStatusSub: "Backend statuslari bo'yicha taqsimot",
     statusNotFound: "Statuslar topilmadi",
     panelDebtorTypes: "Qarzdor turlari", panelDebtorTypesSub: "Backend debtor type kesimi",
@@ -57,7 +57,7 @@ const DASHBOARD_UI = {
     heroSub: "Bogot Armada NRG internal CRM • clients, tasks, debtors and payments in one panel",
     kpiCustomers: "Total clients", kpiDebtors: "Debtors",
     kpiOverdue: "Total debt", kpiActiveTasks: "Active tasks",
-    panelCashflow: "Cash flow trend", panelCashflowSub: "Income minus expense (mln UZS)",
+    panelCashflow: "Cash flow trend", panelCashflowSub: "Income minus expense (UZS)",
     panelStatus: "Customer statuses", panelStatusSub: "Distribution by backend statuses",
     statusNotFound: "No statuses found",
     panelDebtorTypes: "Debtor types", panelDebtorTypesSub: "Backend debtor type breakdown",
@@ -321,7 +321,7 @@ function DashboardPage() {
     });
     return {
       labels: buckets.map((bucket) => bucket.label),
-      series: buckets.map((bucket) => Math.round((bucket.value / 1000000) * 10) / 10),
+      series: buckets.map((bucket) => bucket.value),
     };
   }, [dateFilteredPayments, dateFrom, dateTo, days]);
 
@@ -404,7 +404,7 @@ function DashboardPage() {
 
       <div className="grid-dash" style={{ marginBottom: 16 }}>
         <Panel title={dashTx("panelCashflow")} subtitle={dashTx("panelCashflowSub")} icon="chart" color="accent">
-          {loading ? <div className="skeleton" style={{ height: 220 }} /> : <AreaChart series={finance.series} labels={finance.labels} height={230} format={(value) => `${value} mln`} />}
+          {loading ? <div className="skeleton" style={{ height: 220 }} /> : <AreaChart series={finance.series} labels={finance.labels} height={230} format={(value) => `${fmtShort(value)} so'm`} />}
         </Panel>
         <Panel title={dashTx("panelStatus")} subtitle={dashTx("panelStatusSub")} icon="users" color="violet">
           {loading ? <div className="skeleton" style={{ height: 220 }} /> : statusData.length ? <Donut data={statusData} size={180} centerLabel={dashTx("centerStatuses")} /> : <EmptyState icon={<I.users size={22} />} title={dashTx("statusNotFound")} />}

@@ -81,7 +81,7 @@ function AnalyticsPage() {
   const byCategory = anM(() => {
     const counts = {};
     data.payments.forEach(p => counts[p.category] = (counts[p.category] || 0) + p.amountUzs);
-    return Object.entries(counts).map(([label, value], i) => ({ label, value: Math.round(value / 1e6), color: ["#22c55e", "#ef4444", "#3b82f6", "#a855f7", "#f59e0b"][i % 5] })).sort((a, b) => b.value - a.value);
+    return Object.entries(counts).map(([label, value], i) => ({ label, value, color: ["#22c55e", "#ef4444", "#3b82f6", "#a855f7", "#f59e0b"][i % 5] })).sort((a, b) => b.value - a.value);
   }, [data.payments]);
 
   const topProducts = anM(() => [...data.products].filter(p => p.status === "active").slice(0, 8).map((p, i) => ({ p, sales: 8 + (i * 3) + (p.powerKw % 7) })).sort((a, b) => b.sales - a.sales), [data.products]);
@@ -132,7 +132,7 @@ function AnalyticsPage() {
 
       <div className="grid-2" style={{ marginBottom: 16 }}>
         <Panel title={anTx("panelByCategory")} icon="box" color="blue">
-          {loading ? <div className="skeleton" style={{ height: 200 }} /> : <BarChart data={byCategory} horizontal format={v => v + " mln"} />}
+          {loading ? <div className="skeleton" style={{ height: 200 }} /> : <BarChart data={byCategory} horizontal valueWidth={130} format={v => fmtShort(v) + " so'm"} />}
         </Panel>
         <Panel title={anTx("panelActiveProducts")} icon="sun" color="teal">
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>

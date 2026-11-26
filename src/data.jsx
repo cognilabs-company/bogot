@@ -1,29 +1,24 @@
 /* data.jsx - shared UI formatters and static option maps */
 
-const fmtUZS = (n) => n == null ? "—" : Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ") + " so'm";
+const fmtUZS = (n) => n == null ? "—" : fmtShort(n) + " so'm";
 const fmtNum = (n) => n == null ? "—" : n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+// Full amount with digit groups, never rounded: 1 512 345 678, 315 500 000, 1 250.75.
 const fmtShort = (n) => {
   const value = Number(n) || 0;
-  const abs = Math.abs(value);
-  const compact = (divisor, suffix) => `${(value / divisor).toFixed(1).replace(/\.0$/, "")} ${suffix}`;
-  if (abs >= 999.95e6) {
-    // Show billions together with the millions so 1 512 000 000 is not rounded to "1.5 mlrd".
-    const sign = value < 0 ? "-" : "";
-    let mlrd = Math.floor(abs / 1e9);
-    let mln = Math.round((abs - mlrd * 1e9) / 1e6);
-    if (mln >= 1000) { mlrd += 1; mln -= 1000; }
-    return mln ? `${sign}${mlrd} mlrd ${mln} mln` : `${sign}${mlrd} mlrd`;
-  }
-  if (abs >= 1e6) return compact(1e6, "mln");
-  if (abs >= 1e3) return compact(1e3, "K");
-  return String(value);
+  const [int, frac] = Math.abs(value).toFixed(2).replace(/\.?0+$/, "").split(".");
+  const grouped = int.replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+  return (value < 0 ? "-" : "") + grouped + (frac ? "." + frac : "");
 };
 
-// Compact form for tight spaces (chart axes, bar labels): 1.5 mlrd, 315.5 mln.
+// Compact scale labels for chart axes only (gridline ticks, not amounts): 1.5 mlrd, 315 mln.
 const fmtCompact = (n) => {
   const value = Number(n) || 0;
-  if (Math.abs(value) >= 1e9) return `${(value / 1e9).toFixed(1).replace(/\.0$/, "")} mlrd`;
-  return fmtShort(value);
+  const abs = Math.abs(value);
+  const c = (d, suf) => `${(value / d).toFixed(1).replace(/\.0$/, "")} ${suf}`;
+  if (abs >= 1e9) return c(1e9, "mlrd");
+  if (abs >= 1e6) return c(1e6, "mln");
+  if (abs >= 1e3) return c(1e3, "K");
+  return String(Math.round(value));
 };
 
 window.fmtUZS = fmtUZS;
