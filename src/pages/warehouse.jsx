@@ -702,7 +702,7 @@ function WarehousePage() {
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               <div>
                 <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-3)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.04em" }}>So'm</div>
-                <BarChart data={moneyChartDataUzs} horizontal height={90} labelWidth={120} valueWidth={72} wrapLabels format={(value) => fmtShort(value)} />
+                <BarChart data={moneyChartDataUzs} horizontal height={90} labelWidth={120} valueWidth={72} wrapLabels format={(value) => fmtCompact(value)} />
               </div>
               <div>
                 <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-3)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.04em" }}>USD</div>

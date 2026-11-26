@@ -6,15 +6,30 @@ const fmtShort = (n) => {
   const value = Number(n) || 0;
   const abs = Math.abs(value);
   const compact = (divisor, suffix) => `${(value / divisor).toFixed(1).replace(/\.0$/, "")} ${suffix}`;
-  if (abs >= 1e9) return compact(1e9, "mlrd");
+  if (abs >= 999.95e6) {
+    // Show billions together with the millions so 1 512 000 000 is not rounded to "1.5 mlrd".
+    const sign = value < 0 ? "-" : "";
+    let mlrd = Math.floor(abs / 1e9);
+    let mln = Math.round((abs - mlrd * 1e9) / 1e6);
+    if (mln >= 1000) { mlrd += 1; mln -= 1000; }
+    return mln ? `${sign}${mlrd} mlrd ${mln} mln` : `${sign}${mlrd} mlrd`;
+  }
   if (abs >= 1e6) return compact(1e6, "mln");
   if (abs >= 1e3) return compact(1e3, "K");
   return String(value);
 };
 
+// Compact form for tight spaces (chart axes, bar labels): 1.5 mlrd, 315.5 mln.
+const fmtCompact = (n) => {
+  const value = Number(n) || 0;
+  if (Math.abs(value) >= 1e9) return `${(value / 1e9).toFixed(1).replace(/\.0$/, "")} mlrd`;
+  return fmtShort(value);
+};
+
 window.fmtUZS = fmtUZS;
 window.fmtNum = fmtNum;
 window.fmtShort = fmtShort;
+window.fmtCompact = fmtCompact;
 
 const TUMAN_MAHALLA = {};
 

@@ -58,7 +58,7 @@ function AreaChart({ series, height = 220, color = "var(--accent)", labels, form
           const yy = y(v);
           return <g key={i}>
             <line x1={padL} x2={w - padR} y1={yy} y2={yy} stroke="var(--border-soft)" strokeWidth="1" />
-            <text x={padL - 8} y={yy + 4} textAnchor="end" fontSize="10.5" fill="var(--text-3)">{fmtShort(Math.round(v))}</text>
+            <text x={padL - 8} y={yy + 4} textAnchor="end" fontSize="10.5" fill="var(--text-3)">{fmtCompact(Math.round(v))}</text>
           </g>;
         })}
         {area && <path d={areaPath} fill={`url(#${gid})`}
